@@ -1,0 +1,6 @@
+# Scene, prefab and project settings stay as text for review and history.
+*.unity text
+*.prefab text
+*.asset text
+*.mat text
+*.meta text
