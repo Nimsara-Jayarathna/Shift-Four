@@ -3,7 +3,7 @@
 **Joint assignment:** SE3062 Intelligent Systems (IS) and SE3032 Graphics and Visualization (GV)  
 **Team:** Exactly four students  
 **Project type:** Single-player, first-person, interactive 3D shooting game  
-**Status:** Initial greybox source is included. Generate it once in Unity, commit the generated assets, then follow the locked ownership and development plan below.  
+**Status:** Initial greybox source is included. Generate it in Unity, replace the member names below, and finish the assigned work before submission.  
 **GV submission deadline in the brief:** 21 October 2026
 
 ## 1. Project summary
@@ -57,16 +57,16 @@ Agents start in their assigned sections but may pursue across section boundaries
 
 ## 4. Team ownership
 
-Names and roles are locked below. Each student owns their section prefab and agent script. Shared interfaces and the main scene have named integrators.
+Fill in names before the concept pitch. Each student owns their section prefab and agent script. Shared interfaces and the main scene have named integrators.
 
 | Student | Name | GV responsibility from brief | IS and section responsibility | Concrete evidence for viva |
 | --- | --- | --- | --- | --- |
-| **1 - World Builder** | **Pamudi** | Overall level layout, NavMesh baking, lighting, and texturing; visual integration of all four sections. | Checkpoint prefab and Scout policy. | Walkable layout, alternate routes, baked NavMesh, lighting decisions, Scout state/score explanations, individual commits. |
-| **2 - Systems Engineer** | **Nimsara** | Player movement/collision, shooting/interaction physics, physical door, player health/recovery, and shared combat/damage behavior. | Storage prefab and Flanker policy. | Door/player physics demo, damage/cover/recovery demo, Flanker goal-selection logic, individual commits. |
-| **3 - Core Developer** | **Nimthara** | Create/import at least two original models: drone and door, including topology and UVs; maintain source model files. Additional integration: consoles, HUD, outcomes. | Server prefab and Guard policy. | Blender source/imports, topology/UV screenshots, Guard cover evaluation, console/HUD integration, individual commits. |
-| **4 - Agent Controller** | **Asmadala** | Transform calculated routes into smooth movement, turning, and animations for all drone types. Own shared A* implementation. | Control-room prefab and Interceptor policy. | A*/route-following/animation demo, movement and rotation code, Interceptor prediction, individual commits. |
+| **1 — World Builder** | TBD | Overall level layout, NavMesh baking, lighting, and texturing; visual integration of all four sections. | Checkpoint prefab and Scout policy. | Walkable layout, alternate routes, baked NavMesh, lighting decisions, Scout state/score explanations, individual commits. |
+| **2 — Systems Engineer** | TBD | Player movement and interaction physics: shooting/collision, interactive door; also owns player health, recovery, and reusable consoles. | Storage prefab and Flanker policy. | Door and player interaction demo, damage/cover/recovery demo, Flanker goal-selection logic, individual commits. |
+| **3 — Core Developer** | TBD | Create/import at least two original models: drone and door, including topology and UVs; maintain source model files. | Server prefab and Guard policy. | Blender source and imported assets, topology/UV screenshots, Guard cover evaluation, individual commits. |
+| **4 — Agent Controller** | TBD | Transform calculated routes into smooth movement, turning, and animations for all drone types. | Control-room prefab and Interceptor policy. | Route-following/animation demo, movement and rotation code, Interceptor prediction, individual commits. |
 
-**Shared work:** Agree on the waypoint format, agent interface, event types, damage interface, and pathfinding service before writing four separate agents. Pamudi defines waypoint locations/connections; Asmadala owns the shared A* implementation and route follower; Nimsara publishes door state; Nimthara provides Guard cover points and shared visual/gameplay presentation assets. All four students must still understand A*. Pamudi integrates the final scene; other members contribute their room prefabs and scripts. Shared code ownership does not remove anyone's individual AI responsibility.
+**Shared work:** Agree on the waypoint format, agent interface, event types, damage interface, and pathfinding service before writing four separate agents. Assign one owner for the shared A* implementation and one reviewer; all four students must still understand it. Student 1 integrates the final scene; other members contribute their room prefabs and scripts. Shared code ownership does not remove anyone's individual AI responsibility.
 
 ## 5. Technical approach
 
@@ -114,7 +114,7 @@ Assets/
   Animations/
   Scripts/
     Player/
-    Gameplay/                   # Player, door, damage, consoles, win/lose
+    Gameplay/                   # Consoles, door, damage, win/lose
     AI/Core/                    # Graph, A*, perception interfaces
     AI/Agents/                  # Scout, Flanker, Guard, Interceptor
     AI/Movement/                # Shared path following and animation
@@ -127,11 +127,11 @@ ProjectSettings/
 **Git rules:**
 
 1. Use one shared GitHub repository. Commit `Assets`, `Packages`, `ProjectSettings`, and every Unity `.meta` file alongside its asset. Ignore generated folders such as `Library`, `Temp`, `Logs`, and build output. Use visible meta files and text asset serialization for reviewable changes.
-2. Keep `main` as the stable demo/submission branch and `develop` as the everyday integration branch. Each member works on a short-lived branch such as `feature/gv-nimsara-door-physics` or `feature/is-nimsara-flanker-scoring`, then opens a pull request to `develop`.
-3. Merge assessed feature work with **Create a merge commit**, not squash, so the individual commit trail remains visible. Promote `develop` to `main` only after the full integration checklist passes.
-4. Pamudi is the integrator for `MainLab.unity`. Other students primarily edit their **own section prefab**, agent scripts, and assigned assets; coordinate before touching the main scene or shared prefabs to reduce scene merge conflicts.
-5. Before merging: open the project, check the Console for errors, run the changed behavior, and test an edge case. After merging: run the relevant shared integration checks.
-6. Keep generated builds and caches out of Git. If model/texture files become unusually large, agree on Git LFS before adding them; everyone must install and use the same setup. See `BRANCHING_STRATEGY.md` for the full rules.
+2. Keep `main` as the working integration branch. Each member works on a short-lived branch such as `feature/scout-checkpoint` or `feature/player-door-flanker`, commits small descriptive changes over time, and opens a pull request for review.
+3. Preserve the individual commit trail when merging, because both rubrics assess continuous personal contribution. Do not wait until the last week for one large upload.
+4. Student 1 is the integrator for `MainLab.unity`. Other students primarily edit their **own section prefab**, agent scripts, and assigned assets; coordinate before touching the main scene or shared prefabs to reduce scene merge conflicts.
+5. Before merging: open the project, check the Console for errors, run the scene, and verify the changed behaviour. After merging: the integrator checks the full level with all four agents.
+6. Keep generated builds and caches out of Git. If model/texture files become unusually large, agree on Git LFS before adding them; everyone must install and use the same setup.
 
 Example commits: `feat(ai): make scout investigate gunfire`, `feat(level): connect storage and server routes`, `feat(player): add health recovery after cover`, `fix(ai): recover from blocked door path`.
 
