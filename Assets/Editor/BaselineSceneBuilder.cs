@@ -220,7 +220,14 @@ public static class BaselineSceneBuilder
     {
         GameObject root = new GameObject("Player");
         root.transform.position = new Vector3(-15f, 0f, -15f);
-        root.AddComponent<CharacterController>().center = new Vector3(0f, 0.9f, 0f);
+        CharacterController playerController = root.AddComponent<CharacterController>();
+        playerController.center = new Vector3(0f, 0.9f, 0f);
+        playerController.height = 1.8f;
+        playerController.radius = 0.35f;
+        playerController.slopeLimit = 50f;
+        playerController.stepOffset = 0.3f;
+        playerController.skinWidth = 0.05f;
+        playerController.minMoveDistance = 0f;
         root.AddComponent<Health>().Configure(100f, true);
         GameObject cameraObject = new GameObject("First person camera");
         cameraObject.transform.SetParent(root.transform, false);
