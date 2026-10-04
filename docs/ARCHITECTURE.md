@@ -1,38 +1,74 @@
-# What the starter code does
+# Architecture - How the Pieces Connect
 
-## A web developer's mental model
+## Mental model
 
-| Familiar idea | Here |
+| Familiar software idea | In this Unity project |
 | --- | --- |
-| App page | Unity scene, `MainLab.unity` |
-| Reusable UI component | Prefab, e.g. a section, drone, or console |
-| Business logic | C# `MonoBehaviour` components on game objects |
-| Application state | `GameSession` for progress and win/loss |
-| Event | `SoundEvents.ShotFired`, `Health.Died`, door change |
-| Shared service | `WaypointGraph.FindRoute()` for A* |
+| Application screen/world | `MainLab.unity` scene |
+| Reusable component | Prefab: section, drone, console |
+| Business/behavior logic | C# `MonoBehaviour` components |
+| Session state | `GameSession` for progress/outcomes |
+| Event | shot/sound, damage/death, door-state change |
+| Shared search service | A* route search over the waypoint graph |
+| Presenter/motor | `DroneMotor` converts ordered route points into movement/animation |
 
-Unity calls `Awake`, `Start`, `Update` and physics callbacks at different times. Do not call another script's `Start` manually. The greybox generator creates ordinary scene objects and assets once; gameplay runs from the scene after that.
+Unity calls `Awake`, `Start`, `Update`, and physics callbacks at different times. Do not call another component's Unity lifecycle methods manually. The greybox generator creates ordinary assets once; after the generated assets are committed, normal work happens through Unity and Git.
 
 ## Runtime flow
 
-1. `PlayerController` reads input, moves its `CharacterController`, raycasts to shoot, and asks a nearby `IInteractable` object to respond to E.
-2. `Health` handles damage and the player's delayed regeneration. `GameSession` tracks consoles, drone deaths, exit, and restart.
-3. Each `DroneBrain` samples visibility at a short interval. Its subclass (`ScoutBrain`, `FlankerBrain`, `GuardBrain`, or `InterceptorBrain`) returns a **named destination with a score**. The four subclasses are separate assessed IS contributions.
-4. `WaypointGraph.FindRoute` selects room waypoints with A*: `f = g + h`, where `g` is distance travelled and `h` is straight-line distance to the goal. When the door closes, the Checkpoint–Storage graph edge is unavailable; the three other connections still offer a route.
-5. `DroneMotor` follows the ordered room points with Unity's `NavMeshAgent`, turns smoothly and gives the visual a simple hover. `LabDoor` moves its kinematic rigidbody, changes the carved obstacle, and updates the graph version. On a version change the motor recalculates its route.
-6. Each drone's shot checks the ray again at firing time. A solid wall, shelf, or pillar intercepts it; that is why the player can take cover and later recover.
+```text
+observe -> choose tactical goal -> A* route -> follow route points -> act -> re-evaluate
+```
 
-The A* graph chooses a **high-level sequence of sections**; NavMeshAgent moves locally around geometry within those sections. Do not replace each member's distinct decision logic with one shared `if (distance < x)` script. Do not calculate an expensive path every rendered frame.
+1. **Player/world - Nimsara lead:** `PlayerController` reads movement/aim/fire/interaction; `Health` handles damage and delayed player regeneration; `LabDoor` performs the physical/controlled movement and publishes open/closed route state.
+2. **Progress/outcomes - Nimthara lead:** `ConsoleSwitch`, `GameSession`, `ExitZone`, and HUD/outcome presentation track consoles, drone deaths, health/progress, exit gating, win/loss, and restart presentation.
+3. **Perception/shared agent base:** `DroneBrain` samples allowed observations such as unobstructed sight, range, recent sound, damage/world events, and remembered last-known position. Agents must not read the player's live hidden position through walls.
+4. **Individual decision policies:** `ScoutBrain`, `FlankerBrain`, `GuardBrain`, and `InterceptorBrain` each select a meaningful tactical destination/action. The four policy files are separate assessed IS contributions.
+5. **Waypoint graph - Pamudi data ownership:** Pamudi places/maintains nodes and connections so they match real navigable routes. The closed shortcut edge is unavailable, while an alternate route remains.
+6. **A* - Asmadala implementation ownership:** the search computes `f = g + h`, tracks parents, reconstructs an ordered route, and returns an explicit no-path result when necessary.
+7. **Route following/animation - Asmadala lead:** `DroneMotor` consumes ordered route points, handles waypoint arrival/turning/braking, and drives readable movement/animation states. On an invalid route or changed graph version it requests a fresh path.
+8. **Combat/cover:** a drone attack checks line of sight at fire time. Fixed walls, shelves, and pillars can intercept the shot, allowing the player to use cover and later recover.
 
-## Editable assets and ownership
+The shared A* graph makes high-level route choices between areas/waypoints; `NavMeshAgent` handles local motion around geometry. Do not replace the students' decision policies with one shared `if (distance < x)` chase behavior. Do not perform full path search every rendered frame.
 
-- `Assets/Scenes/MainLab.unity`: overall assembly, walls, graph, door, player, NavMesh surface. Member 1 integrates; coordinate shared edits.
-- `Assets/Prefabs/Sections/<Section>.prefab`: each room's floor, cover, console. One owner per prefab.
-- `Assets/Prefabs/Agents/<Agent>.prefab`: one owner per drone and its visual changes; model importer coordinates shared artwork.
-- `Assets/Scripts/AI/Agents/`: one policy file per student.
-- `Assets/Scripts/AI/Core/`: shared perception/A* contract. Assign an owner and reviewer for changes.
-- `Assets/Scripts/AI/Movement/`: shared movement and animation, led by Member 4.
-- `Assets/Scripts/Gameplay/`: player, door, console, health, exit, led by Member 2.
-- `ArtSource/`: original editable `.blend` source kept by Member 3; exported Unity models go in `Assets/Models/` after import.
+## Ownership by code/asset area
 
-This baseline intentionally uses placeholder cubes. Students replace or develop them through their own assessable contributions. The small graph is easy to explain but still needs route demonstrations, tests and tuning in the actual game.
+- `Assets/Scenes/MainLab.unity` - **Pamudi** coordinates final assembly, shared room connections, waypoint placement, and NavMesh integration.
+- Checkpoint prefab + `ScoutBrain.cs` - **Pamudi**.
+- Storage prefab + player/door/health/combat + `FlankerBrain.cs` - **Nimsara**.
+- Server prefab + `GuardBrain.cs` + `ArtSource/` + `Assets/Models/` - **Nimthara**.
+- `ConsoleSwitch.cs`, `GameSession.cs`, `ExitZone.cs`, HUD/outcome presentation - **Nimthara** as workload balance.
+- Control prefab + A* implementation + `DroneMotor.cs` + animation assets + `InterceptorBrain.cs` - **Asmadala**.
+- `WaypointGraph.cs`, `DroneBrain.cs`, shared prefabs/interfaces - one named owner in the PR, reviewed by another affected member.
+
+## Shared interface rules
+
+### Player/world events
+
+Nimsara's systems expose only the information other systems need: shot/sound event, health/damage/death, door state, and observed/relevant player state. Do not let AI components bypass perception and reach directly into player internals for hidden information.
+
+### Agent decision output
+
+An agent policy outputs a **tactical destination/action**, not raw animation instructions. This separation lets the same A*/movement pipeline serve all four agents while keeping each student's AI contribution distinct.
+
+### Path search output
+
+A* returns either:
+
+- an ordered list of route points/nodes, or
+- a clear no-path result.
+
+The requesting agent must have an intentional fallback for no-path/invalid-goal cases.
+
+### Door update
+
+The physical door and its visual are separate responsibilities:
+
+- Nimsara owns the door behavior/collider/Rigidbody and publishes state;
+- Nimthara supplies the custom door model/visual;
+- Pamudi ensures the graph/level has both shortcut and alternate route;
+- Asmadala invalidates/recalculates routes when the graph changes.
+
+### Performance rule
+
+Perception/decision/path requests run on events or modest intervals. Smooth movement/animation can update per frame, but expensive search should not.

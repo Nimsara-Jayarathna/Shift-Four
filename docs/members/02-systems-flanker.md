@@ -1,21 +1,40 @@
-# Member 2 — Systems Engineer and Flanker
+# Nimsara - Student 2: Systems Engineer and Flanker
 
-**Your IS assessment:** the Flanker's distinct goal selection. **Your GV assessment:** player movement/collision, shooting, and environmental interaction with a working door. You own the Storage section, player health/recovery, and reusable console behaviour.
+**Official GV role:** Systems Engineer  
+**IS agent:** Flanker  
+**Section:** Storage
 
-## Start from the baseline
-
-Open `Assets/Prefabs/Sections/Storage.prefab`, `Assets/Scripts/AI/Agents/FlankerBrain.cs`, and `Assets/Scripts/Gameplay/`. The starter uses `CharacterController`, raycast shooting, `Health`, `ConsoleSwitch`, and a kinematic `Rigidbody` sliding door. The cover is fixed; keep it fixed. The door and player already have colliders so the interactions have physical consequences.
+Your assessed GV responsibility is player interaction physics: movement/collision and reliable environmental interaction, especially the physical shortcut door. Your assessed IS responsibility is the Flanker's side-position decision logic. You also own shared combat/health/cover behavior.
 
 ## Work in this order
 
-1. Arrange Storage shelves so **two usable approach routes** and fixed hiding places remain. Test the player can walk around shelves and the NavMeshAgent can reach both flanking sides. Coordinate with Member 1 before main-scene changes or a rebake.
-2. Test movement, aim, fire, damage and recovery. The default is 100 player health, 10 damage per drone hit, three seconds without damage before recovery at eight health per second. Tune these values only to improve playability and keep them documented.
-3. Open and close the shortcut door while the player and agents are nearby. Check its collider blocks the player when closed, its visual actually moves aside, and the route changes without trapping agents. The `LabDoor` code uses `Rigidbody.MovePosition` in `FixedUpdate`; be ready to explain that controlled physical movement.
-4. In `FlankerBrain.cs`, improve how it evaluates two sides: lateral angle, route cost, reachability and a fallback if a side is blocked. The player should visibly encounter a side approach; do not merely change the Scout's colour or patrol points.
-5. Verify consoles cannot increment progress twice and the game cannot declare victory before four consoles and four disabled drones. Verify death and restart.
+1. Stabilize first-person movement, mouse look, collision, shooting, and interaction.
+2. Arrange Storage with **two usable side approaches** and fixed cover. Coordinate geometry/NavMesh changes with Pamudi.
+3. Stabilize shared damage/health rules, player death/restart, and delayed recovery after the player avoids damage.
+4. Verify fixed walls/shelves/pillars actually block drone attack raycasts.
+5. Finalize the shortcut door's controlled physical motion, collider, Rigidbody behavior, and open/closed state event. Tell Pamudi/Asmadala which route edge changes.
+6. In `FlankerBrain.cs`, evaluate side candidates using reachability, lateral/approach value, and route/path cost. Re-select or fall back when a candidate is blocked/exposed/unreachable.
+7. Test door open/closed while a drone is already routing, plus no-valid-flank fallback.
 
-## Evidence to produce
+Nimthara owns the reusable console/HUD/outcome presentation as a workload balance. Do not spend your GV evidence time replacing the required Systems Engineer physics/interactions with UI work.
 
-Record a short cover/health demonstration and a door route-change example. Show candidate flank scores and why one won. Commit in small pieces such as `feat(player): add damage and recovery`, `feat(door): replan after shortcut closes`, `feat(ai): score flanking approaches`.
+## Branch examples
 
-**Done when:** movement/shooting/interactions feel reliable; cover actually blocks shots; health recovery is readable; the door affects a valid route; Flanker chooses and changes side approaches without getting stuck.
+```text
+feature/gv-nimsara-player-physics
+feature/gv-nimsara-door-physics
+feature/gv-nimsara-combat-health
+feature/is-nimsara-flanker-scoring
+feature/is-nimsara-flanker-fallback
+```
+
+## Evidence
+
+- movement/collision and raycast interaction;
+- physical door motion + collider consequence;
+- cover blocks shots + health recovery timing;
+- at least two flank candidates and the score/reason one wins;
+- invalid flank fallback;
+- regular personal commits.
+
+**Done when:** player interactions feel reliable, cover and recovery work, the door physically and logically changes a route, and Flanker visibly chooses/rechooses a side approach without freezing.

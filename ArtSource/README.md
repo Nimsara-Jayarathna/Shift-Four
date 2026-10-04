@@ -1,3 +1,7 @@
-# Original models go here
+# Original models - Nimthara / Core Developer
 
-Member 3 places the editable Blender sources for the original drone and lab door here, with meaningful filenames. Exported Unity model files belong in `Assets/Models/`. The generated Unity cubes are placeholders and do not count as two original models. Keep a few topology/UV screenshots for the viva. Agree on Git LFS as a team before committing unusually large binaries.
+Nimthara (Student 3 - Core Developer) keeps the editable Blender source for the **original security drone and lab door** here with meaningful filenames. Exported/imported Unity model files belong in `Assets/Models/`.
+
+The generated Unity primitive placeholders do not count as the two original models. Preserve topology/UV screenshots for the viva and keep the `.blend` sources so originality and workflow can be demonstrated. Coordinate the lab-door visual with Nimsara's physical door root/collider/Rigidbody and the drone visual hierarchy with Asmadala's movement/animation setup.
+
+Agree on Git LFS as a team before committing unusually large binary assets.

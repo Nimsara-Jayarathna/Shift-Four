@@ -1,51 +1,80 @@
 # Shift Four
 
-A short first-person game set during a locked-down lab shift. Cross four connected sections, disable four security drones, activate four consoles, and reach the marked exit. This one Unity project is the shared deliverable for **SE3062 Intelligent Systems** and **SE3032 Graphics and Visualization**.
+A short first-person security-lab escape game built as the **joint project for SE3062 Intelligent Systems and SE3032 Graphics and Visualization**. The player crosses four connected lab sections, disables four autonomous security drones, activates four consoles, and reaches the exit.
 
-**Team:** exactly four students. **Engine:** Unity 6.3 LTS, initially pinned to `6000.3.0f1`. **Language:** C#. **Models:** Blender. **Repository:** one GitHub repository.
+**Engine:** Unity 6.3 LTS (initial baseline pinned to `6000.3.0f1`)  
+**Language:** C#  
+**Modeling:** Blender  
+**Repository:** one Git repository / one Unity project  
+**Team:** Pamudi, Nimsara, Nimthara, Asmadala
 
-## Start here — first time only
+## Start with the plan
 
-1. Install Unity Hub and the **Unity 6.3.0f1** Editor with desktop build support for the platform on which you will demonstrate. If everyone already has another **identical** Unity 6.3 patch, agree on it together before importing.
-2. Extract this ZIP. In Unity Hub choose **Add project from disk** and select the extracted `shift-four` directory that contains `Assets`, `Packages`, and `ProjectSettings`. Do not create a new Unity project around these folders.
-3. Let Unity import the AI Navigation package and scripts. If it prompts to upgrade the project because your editor patch differs, use the team-agreed patch on every computer.
-4. Under **Edit > Project Settings > Player > Other Settings**, set **Active Input Handling** to **Input Manager (Old)** or **Both**. The starter controls use Unity's built-in input names. Restart the Editor if Unity asks. Under **Project Settings > Editor**, use **Force Text** asset serialization and **Visible Meta Files**.
-5. In the top menu choose **Tools > Shift Four > Generate Greybox Once**. This creates `Assets/Scenes/MainLab.unity`, four editable section prefabs, four drone prefabs, materials, the NavMesh, and the build scene entry. Do this **once, on one computer**. The menu refuses to overwrite an existing scene.
-6. Open `Assets/Scenes/MainLab.unity` and press **Play**. Click the Game view if necessary to lock the cursor. Walk with WASD, aim with the mouse, shoot with left click, interact with E. Escape releases the cursor. Defeat the drones, activate the consoles, and walk onto the green exit square. R restarts after a win or loss.
-7. Stop Play mode. Save the scene and project. Confirm no red Console errors, then follow [Git setup](docs/GIT_WORKFLOW.md). Commit all generated `.meta` files, the scene, prefabs, and NavMesh data.
+Before changing code or assets, read these files in order:
 
-If **Tools > Shift Four** is absent, a compiler/package error prevented the editor script from loading. Check the Unity Console before trying the menu. See [Setup and troubleshooting](docs/SETUP.md).
+1. [Master project plan](docs/PROJECT_PLAN.md)
+2. [Development roadmap - what to build first](docs/DEVELOPMENT_ROADMAP.md)
+3. [Branching strategy - `main`, `develop`, feature branches](docs/BRANCHING_STRATEGY.md)
+4. [Team responsibilities and handoffs](docs/TEAM_RESPONSIBILITIES.md)
+5. [Assessment evidence checklist](docs/ASSESSMENT_EVIDENCE.md)
+6. Your personal guide in [`docs/members/`](docs/members/)
 
-## What the baseline already provides
+The official GV roles are fixed:
 
-- One scene containing four connected rooms and fixed cover, with a shortcut door and a second route around it.
-- Player movement, aiming, raycast shooting, damage, three-second recovery delay, death, restart, four reusable consoles, and a gated exit.
-- Four simultaneously active placeholder drones with separate Scout, Flanker, Guard, and Interceptor scripts; visible current decisions in the HUD.
-- A small shared A* graph for room-to-room route choice and a NavMeshAgent-based route follower. The door changes the graph edge and NavMesh obstacle.
-- An editor generator that creates **separate Unity prefabs**, so each member can own their section and drone without editing the main scene together.
+| Student | Name | Official GV role | Section | IS agent |
+| --- | --- | --- | --- | --- |
+| 1 | **Pamudi** | **World Builder** | Checkpoint | Scout |
+| 2 | **Nimsara** | **Systems Engineer** | Storage | Flanker |
+| 3 | **Nimthara** | **Core Developer** | Server | Guard |
+| 4 | **Asmadala** | **Agent Controller** | Control | Interceptor |
 
-**This is an initial baseline, not a finished submission.** The drones use simple starter policies, art is made of Unity primitives, and movement feedback is basic. Each student must develop their own assessed component, make regular attributable commits, test it, and explain it in the viva. Unity is not available in the archive-generation environment, so the generated scene must be opened and verified in your local Editor before treating it as a working build.
+Each room and IS agent is additional ownership. It does **not** replace the student's prescribed GV component.
 
-## Individual work
+## First-time setup
 
-| Member | Section and IS agent | Prescribed GV responsibility | Detailed guide |
-| --- | --- | --- | --- |
-| 1 | Checkpoint / Scout | Overall layout, NavMesh, lighting, textures | [Member 1](docs/members/01-world-scout.md) |
-| 2 | Storage / Flanker | Player physics, shooting, interactions, door | [Member 2](docs/members/02-systems-flanker.md) |
-| 3 | Server / Guard | Two original Blender models, UVs, import | [Member 3](docs/members/03-models-guard.md) |
-| 4 | Control / Interceptor | Smooth route following, turning, animations | [Member 4](docs/members/04-movement-interceptor.md) |
+1. Install Unity Hub and the **Unity 6.3.0f1** Editor with desktop build support for the demonstration platform. If the team intentionally changes patch version, everyone must use the same one.
+2. Extract/clone this repository. In Unity Hub choose **Add project from disk** and select the folder containing `Assets`, `Packages`, and `ProjectSettings`.
+3. Let Unity import packages and compile. Set **Active Input Handling** to **Input Manager (Old)** or **Both** if Unity requests it. Under **Project Settings > Editor**, use **Force Text** asset serialization and **Visible Meta Files**.
+4. On the designated baseline/integration machine only, choose **Tools > Shift Four > Generate Greybox Once**. This creates the initial `MainLab.unity`, section/drone prefabs, materials, NavMesh, and build-scene entry. Do this once and commit the generated assets.
+5. Open `Assets/Scenes/MainLab.unity` and press **Play**. Test WASD, mouse look, left-click shooting, `E` interaction, and `R` restart after win/loss.
+6. Push the verified baseline to `main`, create `develop`, then use the workflow in [BRANCHING_STRATEGY.md](docs/BRANCHING_STRATEGY.md). Everyone else clones the repository and **must not rerun the generator**.
 
-Write names in [the ownership table](docs/SCOPE.md#4-team-ownership) before the concept pitch. Every member owns **one agent and one GV role**; the lab section is an additional, practical division of the work.
+If **Tools > Shift Four** is missing, inspect the Unity Console for the first compiler/package error. See [Setup and troubleshooting](docs/SETUP.md).
+
+## What the baseline provides
+
+- One connected four-section level generated from an editor tool.
+- First-person movement, aiming, shooting, health/damage/recovery, consoles, door, exit, and restart scaffolding.
+- Four placeholder drones with Scout, Flanker, Guard, and Interceptor scripts.
+- A shared waypoint/A* structure plus `NavMeshAgent` route following.
+- Separate section prefabs to reduce Unity scene conflicts.
+
+**The baseline is not the final submission.** Placeholder art, starter policies, movement feedback, and tuning must be developed by the assigned students, with regular attributable commits and viva-ready explanations.
+
+## Branching in one sentence
+
+`feature/*` / `fix/*` / `docs/*` -> **PR to `develop`** -> integration test -> **PR `develop` to `main`** -> release tag.
+
+`main` is stable/submission-ready. `develop` is the shared integration branch. Do not maintain separate long-lived GV and IS branches; both modules use the same integrated game.
+
+## Updated planning PDF
+
+- [Shift Four - Updated Team Implementation Plan (PDF)](docs/Shift_Four_Updated_Team_Implementation_Plan.pdf)
 
 ## Essential documents
 
-- [Locked game scope and grading evidence](docs/SCOPE.md)
-- [Environment setup and first run](docs/SETUP.md)
-- [How the AI and gameplay pieces connect](docs/ARCHITECTURE.md)
-- [Git and scene ownership](docs/GIT_WORKFLOW.md)
-- [Integration and playthrough checks](docs/INTEGRATION.md)
-- [Individual member guides](docs/members/)
+- [PROJECT_PLAN.md](docs/PROJECT_PLAN.md) - master plan and ownership
+- [DEVELOPMENT_ROADMAP.md](docs/DEVELOPMENT_ROADMAP.md) - phase-by-phase order and dependencies
+- [BRANCHING_STRATEGY.md](docs/BRANCHING_STRATEGY.md) - branch naming, PR flow, protection, release tagging
+- [TEAM_RESPONSIBILITIES.md](docs/TEAM_RESPONSIBILITIES.md) - each member's files, handoffs, and done criteria
+- [ASSESSMENT_EVIDENCE.md](docs/ASSESSMENT_EVIDENCE.md) - proof to collect for GV/IS marks and viva
+- [SCOPE.md](docs/SCOPE.md) - locked game scope
+- [SETUP.md](docs/SETUP.md) - first run and build
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - runtime/code flow
+- [GIT_WORKFLOW.md](docs/GIT_WORKFLOW.md) - command-level daily Git workflow
+- [INTEGRATION.md](docs/INTEGRATION.md) - integration, release, demo checks
+- [CONTRIBUTING.md](CONTRIBUTING.md) - contributor quick start
 
 ## Repository rule
 
-Use **one repo and one Unity project**. `main` stays playable. Short branches and non-squashed pull requests preserve every student's history. Commit `Assets/`, `Packages/`, `ProjectSettings/`, `ArtSource/`, docs, and all `.meta` files. Do not commit Unity's generated `Library/`, `Temp/`, or build output. If the two courses ask for separate submissions, use the same source project and prepare the requested evidence for each course.
+Commit `Assets/`, `Packages/`, `ProjectSettings/`, `ArtSource/`, docs, and every required `.meta` file. Do not commit Unity-generated `Library/`, `Temp/`, logs, IDE state, or build output. Preserve individual commit history; for assessed feature work use normal merge commits rather than squashing everything into one final commit.
