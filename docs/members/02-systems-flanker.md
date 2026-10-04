@@ -1,40 +1,44 @@
 # Nimsara - Student 2: Systems Engineer and Flanker
 
-**Official GV role:** Systems Engineer  
-**IS agent:** Flanker  
+**Official GV role:** Systems Engineer
 **Section:** Storage
+**IS agent:** Flanker
 
-Your assessed GV responsibility is player interaction physics: movement/collision and reliable environmental interaction, especially the physical shortcut door. Your assessed IS responsibility is the Flanker's side-position decision logic. You also own shared combat/health/cover behavior.
+Your GV evidence is centered on **player physics and environmental interaction**. Your IS evidence is the Flanker's distinct side-route decision logic. The complete locked sequence is in [NIMSARA_IMPLEMENTATION_PLAN.md](NIMSARA_IMPLEMENTATION_PLAN.md).
 
-## Work in this order
+## Branch sequence
 
-1. Stabilize first-person movement, mouse look, collision, shooting, and interaction.
-2. Arrange Storage with **two usable side approaches** and fixed cover. Coordinate geometry/NavMesh changes with Pamudi.
-3. Stabilize shared damage/health rules, player death/restart, and delayed recovery after the player avoids damage.
-4. Verify fixed walls/shelves/pillars actually block drone attack raycasts.
-5. Finalize the shortcut door's controlled physical motion, collider, Rigidbody behavior, and open/closed state event. Tell Pamudi/Asmadala which route edge changes.
-6. In `FlankerBrain.cs`, evaluate side candidates using reachability, lateral/approach value, and route/path cost. Re-select or fall back when a candidate is blocked/exposed/unreachable.
-7. Test door open/closed while a drone is already routing, plus no-valid-flank fallback.
+1. `feature/gv-nimsara-player-physics`
+2. `feature/gv-nimsara-combat-health`
+3. `feature/gv-nimsara-door-physics`
+4. `feature/gv-nimsara-storage-section`
+5. `feature/is-nimsara-flanker-scoring`
+6. `feature/is-nimsara-flanker-fallback`
+7. `fix/nimsara-integration-polish` only for genuine integration defects
 
-Nimthara owns the reusable console/HUD/outcome presentation as a workload balance. Do not spend your GV evidence time replacing the required Systems Engineer physics/interactions with UI work.
+Finish, test, PR, and merge one branch before creating the next from updated `develop`.
 
-## Branch examples
+## Current branch: player physics
 
-```text
-feature/gv-nimsara-player-physics
-feature/gv-nimsara-door-physics
-feature/gv-nimsara-combat-health
-feature/is-nimsara-flanker-scoring
-feature/is-nimsara-flanker-fallback
-```
+The implementation notes and test checklist are in:
 
-## Evidence
+[feature/gv-nimsara-player-physics](../branches/feature-gv-nimsara-player-physics.md)
 
-- movement/collision and raycast interaction;
-- physical door motion + collider consequence;
-- cover blocks shots + health recovery timing;
-- at least two flank candidates and the score/reason one wins;
-- invalid flank fallback;
-- regular personal commits.
+This branch owns:
 
-**Done when:** player interactions feel reliable, cover and recovery work, the door physically and logically changes a route, and Flanker visibly chooses/rechooses a side approach without freezing.
+- first-person WASD movement;
+- normalized diagonal movement;
+- `CharacterController` collision;
+- gravity and grounded handling;
+- mouse yaw + clamped camera pitch;
+- cursor lock/release/relock behavior;
+- forward interaction raycast and range;
+- stopping player input after death/end state.
+
+It intentionally leaves the later combat/health, door, Storage-layout, and Flanker work to their own branches.
+
+## Your later assessed work
+
+After this branch is merged, continue with combat/health/cover, then the physical shortcut door and its navigation-state handoff, then Storage geometry, and finally the Flanker's utility-scored left/right route selection and fallback behavior.
+
+**Do not replace your required Systems Engineer work with UI tasks.** Nimthara owns the reusable console/HUD/outcome presentation as the team's workload balance.
