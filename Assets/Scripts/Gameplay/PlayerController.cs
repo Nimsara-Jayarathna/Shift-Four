@@ -5,7 +5,7 @@ namespace ShiftFour
     /// <summary>
     /// First-person player controller owned by the Systems Engineer (Nimsara).
     ///
-    /// Branch: feature/gv-nimsara-player-physics
+    /// Branch: feature/gv-IT24103464-player-physics
     /// Scope for this branch: movement, CharacterController collision, mouse look,
     /// cursor handling, and the reusable interaction raycast. Shooting remains the
     /// existing baseline behavior and is refined on the later combat/health branch.
@@ -197,7 +197,7 @@ namespace ShiftFour
                 interactable.Interact();
 
             // Kept unchanged in purpose for this branch. Combat-specific behavior is
-            // intentionally refined later in feature/gv-nimsara-combat-health.
+            // intentionally refined later in feature/gv-IT24103464-combat-health.
             if (Input.GetMouseButton(0) && Time.time >= nextShot)
                 Shoot(viewRay);
         }

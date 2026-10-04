@@ -1,4 +1,4 @@
-# feature/gv-nimsara-player-physics
+# feature/gv-IT24103464-player-physics
 
 **Owner:** Nimsara
 **GV role:** Systems Engineer
@@ -26,7 +26,7 @@ This branch deliberately does **not** implement the later Nimsara work for comba
 ```text
 Assets/Scripts/Gameplay/PlayerController.cs
 Assets/Editor/BaselineSceneBuilder.cs
-docs/branches/feature-gv-nimsara-player-physics.md
+docs/branches/feature-gv-IT24103464-player-physics.md
 ```
 
 ## Important: existing generated scene
@@ -78,11 +78,11 @@ fix(gv): constrain player interaction to valid nearby targets
 ## PR target
 
 ```text
-feature/gv-nimsara-player-physics -> develop
+feature/gv-IT24103464-player-physics -> dev
 ```
 
-After review/merge, create the next branch from the updated `develop`:
+After review/merge, create the next branch from the updated `dev`:
 
 ```text
-feature/gv-nimsara-combat-health
+feature/gv-IT24103464-combat-health
 ```

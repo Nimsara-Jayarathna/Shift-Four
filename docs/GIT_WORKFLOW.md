@@ -1,49 +1,85 @@
-# One repo, four accountable contributors
+# Git Workflow - `main` + `dev` + Short Student Branches
 
-## The initial push (done by one teammate)
+## Permanent branches
 
-First open the extracted project in Unity, generate `MainLab`, press Play, and save everything. Create a **private** repository named `shift-four` on GitHub and add the four students as collaborators. In the `shift-four` directory run:
+- `main` - stable/demo/submission branch. Do not develop directly here.
+- `dev` - shared team integration branch. Normal feature PRs target `dev`.
 
-```bash
-git init -b main
-git add .
-git commit -m "chore: initialize Shift Four Unity greybox"
-git remote add origin https://github.com/YOUR-ACCOUNT/shift-four.git
-git push -u origin main
+## Student 2 naming convention
+
+Use the exact student-ID naming format already present in the repository:
+
+```text
+feature/gv-IT24103464-player-physics
+feature/gv-IT24103464-combat-health
+feature/gv-IT24103464-door-physics
+feature/gv-IT24103464-storage-section
+feature/IS-IT24103464-flanker-scoring
+feature/IS-IT24103464-flanker-fallback
+fix/IT24103464-integration-polish
 ```
 
-Replace `YOUR-ACCOUNT` with the real owner or organization. If Git is already initialized, skip `git init`. Inspect `git status` and `git diff --cached --stat` before the initial commit. The first commit must include `Assets`, all `.meta` files, `Packages`, `ProjectSettings`, `docs`, and `ArtSource` when it contains models; it must **not** include `Library`, `Temp`, local build folders or editor caches. Use your own Git name/email so individual work is attributed correctly.
+Do not create a second repo for IS. Both modules remain in the same Unity project.
 
-## Each task after that
-
-Every member **clones the same repo**. Do not create four copies of the Unity project or a second AI repo. For one small task:
+## Start the Flanker scoring branch
 
 ```bash
-git switch main
-git pull
-git switch -c feature/scout-investigation
-# Edit your assigned files in Unity and save. Run the changed behaviour.
-git status
-git add Assets/Scripts/AI/Agents/ScoutBrain.cs
-git commit -m "feat(ai): make scout search last known position"
-git push -u origin feature/scout-investigation
+git switch dev
+git pull origin dev
+git switch -c feature/IS-IT24103464-flanker-scoring
 ```
 
-Open a pull request to `main`, have another member review it, then merge it **without squash** so the sequence of individual commits remains visible. Start a fresh branch from updated `main` for the next task. Replace Scout with your assigned agent/role in the example.
+If the branch already exists:
 
-Commit at natural checkpoints: section shape, first agent goal choice, blocked-route fallback, model topology, UVs, animations and bug fixes. A series of truthful commits is much stronger viva evidence than a last-day upload. Do not rename teammates' files solely to create a commit.
+```bash
+git switch feature/IS-IT24103464-flanker-scoring
+git pull origin feature/IS-IT24103464-flanker-scoring
+```
 
-## Unity file ownership
+## Three implementation checkpoints
+
+Follow [`docs/branches/IT24103464_FLANKER_3_DAY_COMMIT_PLAN.md`](branches/IT24103464_FLANKER_3_DAY_COMMIT_PLAN.md).
+
+Recommended truthful checkpoint commits, after each version is actually opened and tested locally:
+
+```text
+feat(is): add remembered navmesh flank candidates
+feat(is): score A-star flank routes and firing positions
+feat(is): stabilize flanker decisions and add diagnostics
+```
+
+Do not backdate commits or manufacture history. The snapshots exist to let the code be implemented, tested, and understood incrementally rather than dropped in as one giant commit.
+
+## PR target
+
+```text
+feature/IS-IT24103464-flanker-scoring
+                  |
+                  v
+                 dev
+```
+
+Use a normal reviewed PR. Preserve the genuine incremental commits instead of squashing the entire branch into a single unexplained commit if your team's assessment workflow expects visible history.
+
+## Unity ownership
 
 | File or area | Normal editor |
 | --- | --- |
-| `Assets/Scenes/MainLab.unity` and NavMesh data | Member 1, coordinating scene integration |
-| `Assets/Prefabs/Sections/Checkpoint.prefab`, `ScoutBrain.cs` | Member 1 |
-| `Assets/Prefabs/Sections/Storage.prefab`, `FlankerBrain.cs`, player/door/gameplay scripts | Member 2 |
-| `Assets/Prefabs/Sections/Server.prefab`, `GuardBrain.cs`, `ArtSource/`, `Assets/Models/` | Member 3 |
-| `Assets/Prefabs/Sections/Control.prefab`, `InterceptorBrain.cs`, `DroneMotor.cs`, animations | Member 4 |
-| `WaypointGraph.cs`, `DroneBrain.cs`, shared prefab changes | Named owner and reviewer agreed in the PR |
+| `Assets/Scenes/MainLab.unity` and NavMesh integration | Pamudi / World Builder |
+| Checkpoint + Scout | Pamudi |
+| Storage + `FlankerBrain.cs` + player/door/gameplay | Student 2 / IT24103464 |
+| Server + Guard + models | Nimthara |
+| Control + Interceptor + shared route follower / A* implementation | Asmadala |
+| Shared interfaces | Named owner with affected-member review |
 
-Prefab changes are separate files. A changed prefab instance in `MainLab.unity` can still modify the main scene, so coordinate it with Member 1. **Never run the greybox generator again** to pull teammate changes. Fetch and merge through Git.
+A branch may **consume** shared A* and movement APIs without taking over their ownership.
 
-If a pull request conflicts in a `.unity` scene or prefab, do not blindly select one side. Have the relevant owners open Unity together, agree on the intended state, and test it after the merge. Merging text-based Unity files is possible, but a clean launch and playthrough is the final check. Keep the exact same Unity Editor patch and committed package manifest on all machines.
+## Before each commit
+
+1. Open the same Unity editor patch used by the team.
+2. Wait for compilation/import.
+3. Confirm no new red Console errors.
+4. Run the behavior relevant to that checkpoint.
+5. Test the fallback/edge case listed in the checkpoint guide.
+6. Inspect `git diff` so only intended files are staged.
+7. Commit with your own Git identity.

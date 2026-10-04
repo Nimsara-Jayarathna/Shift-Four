@@ -1,15 +1,12 @@
-# Branch Snapshot
+# Branch Snapshot Status - Baseline
 
-This archive is the completed code snapshot for:
+**Branch:** `feature/IS-IT24103464-flanker-scoring`  
+**Base / PR target:** `dev`  
+**Snapshot:** 0 - branch starting point  
+**Implementation commit:** none for this snapshot
 
-```text
-feature/gv-nimsara-player-physics
-```
+This is the full-codebase baseline before the three Flanker implementation checkpoints. `FlankerBrain.cs` is intentionally still the small starter policy.
 
-**Owner:** Nimsara
-**Role:** Systems Engineer
-**PR target:** `develop`
+Use this package to understand the starting point and confirm the project opens. Do not present the baseline as completed IS work.
 
-Implemented scope: first-person movement, CharacterController collision, gravity/grounding, mouse look, cursor handling, interaction raycast/range, and baseline player controller setup in the greybox builder.
-
-Not included yet: combat/health refinement, physical-door refinement, Storage section redesign, Flanker scoring, or Flanker fallback. Those remain separate branches according to `docs/members/NIMSARA_IMPLEMENTATION_PLAN.md`.
+Next package: `Shift-Four-feature-IS-IT24103464-flanker-scoring-day1.zip`.
