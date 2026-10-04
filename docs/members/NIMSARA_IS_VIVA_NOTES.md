@@ -1,7 +1,26 @@
-# IT24103464 - Flanker Viva Notes (Baseline)
+# IT24103464 - Flanker Viva Notes - Checkpoint 1
 
-This snapshot is **before** the three planned Flanker implementation checkpoints. Do not use it as final viva evidence.
+## What exists now
 
-At baseline the agent only has a simple left/right route idea with basic reachability and distance scoring. The branch plan is to add target memory and NavMesh-valid candidates, then real A* route-cost scoring, then stability/diagnostics.
+The Flanker generates left/right side positions around the latest legitimate target point, snaps those positions to the NavMesh, checks reachability, and scores them numerically.
 
-Read `docs/branches/IT24103464_FLANKER_3_DAY_COMMIT_PLAN.md` and update your explanation as each checkpoint is completed.
+Checkpoint 1 score:
+
+```text
+score = 42
+      + lateralQuality * 30
+      + rangeQuality * 12
+      - straightLineTravel * 0.35
+```
+
+## Key explanation
+
+- `LastKnown` is used after sight is lost, so the agent does not track the hidden live player position.
+- `lateralQuality` is highest near a 90-degree side approach.
+- `rangeQuality` rewards finishing around the preferred attack distance.
+- NavMesh snapping prevents choosing obviously non-walkable raw points.
+- shared graph `Reachable()` rejects a candidate with no route.
+
+## Not final yet
+
+Actual A* route length, firing-line quality, route-aware fallbacks, commitment/hysteresis and diagnostics are added in later checkpoints.

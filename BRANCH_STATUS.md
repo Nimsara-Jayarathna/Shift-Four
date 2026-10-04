@@ -1,12 +1,25 @@
-# Branch Snapshot Status - Baseline
+# Branch Snapshot Status - Checkpoint 1
 
 **Branch:** `feature/IS-IT24103464-flanker-scoring`  
 **Base / PR target:** `dev`  
-**Snapshot:** 0 - branch starting point  
-**Implementation commit:** none for this snapshot
+**Checkpoint:** 1 of 3  
+**Recommended commit:** `feat(is): add remembered navmesh flank candidates`
 
-This is the full-codebase baseline before the three Flanker implementation checkpoints. `FlankerBrain.cs` is intentionally still the small starter policy.
+Implemented in this snapshot:
 
-Use this package to understand the starting point and confirm the project opens. Do not present the baseline as completed IS work.
+- target memory using `LastSeenAt` / `LastKnown`;
+- left/right flank generation around the legitimate target point;
+- NavMesh snapping;
+- shared graph reachability check;
+- lateral-quality and preferred-range utility terms;
+- close-range and Storage fallback behavior.
 
-Next package: `Shift-Four-feature-IS-IT24103464-flanker-scoring-day1.zip`.
+Not implemented yet:
+
+- actual A* route-length scoring;
+- firing-line quality;
+- route-aware fallback scoring;
+- commitment / hysteresis;
+- decision diagnostics / candidate gizmos.
+
+Open and test this snapshot before committing it. Then move to Checkpoint 2.

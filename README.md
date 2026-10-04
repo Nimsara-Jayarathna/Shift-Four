@@ -54,6 +54,6 @@ Use **one repo and one Unity project**. `main` is stable and `dev` is the team i
 
 **Branch:** `feature/IS-IT24103464-flanker-scoring`  
 **PR target:** `dev`  
-**Snapshot:** Baseline before Flanker checkpoint commits
+**Snapshot:** Checkpoint 1 - target memory and NavMesh flank candidates
 
 Read [`BRANCH_STATUS.md`](BRANCH_STATUS.md) and the [three-checkpoint commit plan](docs/branches/IT24103464_FLANKER_3_DAY_COMMIT_PLAN.md) before applying or committing this snapshot.
