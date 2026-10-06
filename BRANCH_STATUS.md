@@ -1,25 +1,24 @@
-# Branch Snapshot Status - Checkpoint 1
+# Branch Snapshot Status - Checkpoint 2
 
 **Branch:** `feature/IS-IT24103464-flanker-scoring`  
 **Base / PR target:** `dev`  
-**Checkpoint:** 1 of 3  
-**Recommended commit:** `feat(is): add remembered navmesh flank candidates`
+**Checkpoint:** 2 of 3  
+**Recommended commit:** `feat(is): score A-star flank routes and firing positions`
 
-Implemented in this snapshot:
+Adds on top of Checkpoint 1:
 
-- target memory using `LastSeenAt` / `LastKnown`;
-- left/right flank generation around the legitimate target point;
-- NavMesh snapping;
-- shared graph reachability check;
-- lateral-quality and preferred-range utility terms;
-- close-range and Storage fallback behavior.
+- actual `WaypointGraph.FindRoute()` route measurement;
+- invalid/no-route candidate rejection;
+- A* route-length penalty;
+- firing-line reward;
+- route-aware pursuit and Storage fallbacks;
+- best-valid-candidate selection.
 
 Not implemented yet:
 
-- actual A* route-length scoring;
-- firing-line quality;
-- route-aware fallback scoring;
-- commitment / hysteresis;
-- decision diagnostics / candidate gizmos.
+- commitment window;
+- switch margin / hysteresis;
+- decision-change logging;
+- Scene-view candidate gizmos.
 
-Open and test this snapshot before committing it. Then move to Checkpoint 2.
+Open and test this snapshot before committing it. Then move to Checkpoint 3.

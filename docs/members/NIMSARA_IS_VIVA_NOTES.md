@@ -1,26 +1,38 @@
-# IT24103464 - Flanker Viva Notes - Checkpoint 1
+# IT24103464 - Flanker Viva Notes - Checkpoint 2
 
 ## What exists now
 
-The Flanker generates left/right side positions around the latest legitimate target point, snaps those positions to the NavMesh, checks reachability, and scores them numerically.
+The Flanker uses the shared A* result as part of its own tactical decision. It measures the actual ordered route length rather than only straight-line distance.
 
-Checkpoint 1 score:
+Checkpoint 2 score:
 
 ```text
 score = 42
       + lateralQuality * 30
       + rangeQuality * 12
-      - straightLineTravel * 0.35
+      + clearFiringLine * 14
+      - AStarRouteLength * 1.15
 ```
 
-## Key explanation
+## A* connection
 
-- `LastKnown` is used after sight is lost, so the agent does not track the hidden live player position.
-- `lateralQuality` is highest near a 90-degree side approach.
-- `rangeQuality` rewards finishing around the preferred attack distance.
-- NavMesh snapping prevents choosing obviously non-walkable raw points.
-- shared graph `Reachable()` rejects a candidate with no route.
+Asmadala owns the shared A* implementation. This agent consumes `WaypointGraph.FindRoute()`.
+
+Know these terms:
+
+- `g`: accumulated travel cost from start;
+- `h`: estimate to goal;
+- `f = g + h`: selection value;
+- parent links: reconstruct the route after reaching the goal;
+- empty/no route: candidate is invalid, so the Flanker chooses another option.
+
+## Tactical terms
+
+- lateral quality -> side approach;
+- range quality -> useful firing distance;
+- firing-line bonus -> candidate is less obstructed relative to the remembered point;
+- route-length penalty -> discourages impractically long flanks.
 
 ## Not final yet
 
-Actual A* route length, firing-line quality, route-aware fallbacks, commitment/hysteresis and diagnostics are added in later checkpoints.
+The agent can still switch too eagerly when left/right scores are nearly equal. Checkpoint 3 adds commitment, switch margin and diagnostics.
