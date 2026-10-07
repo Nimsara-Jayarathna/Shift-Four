@@ -1,15 +1,18 @@
-# Branch Snapshot
+# Branch Snapshot Status - Checkpoint 3 / Final
 
-This archive is the completed code snapshot for:
+**Branch:** `feature/IS-IT24103464-flanker-scoring`  
+**Base / PR target:** `dev`  
+**Checkpoint:** 3 of 3 - branch implementation complete  
+**Recommended commit:** `feat(is): stabilize flanker decisions and add diagnostics`
 
-```text
-feature/gv-nimsara-player-physics
-```
+Adds on top of Checkpoint 2:
 
-**Owner:** Nimsara
-**Role:** Systems Engineer
-**PR target:** `develop`
+- minimum decision commitment;
+- switch margin / hysteresis;
+- route-invalidity override;
+- decision diagnostics;
+- Scene-view flank candidate gizmos;
+- final fallback behavior;
+- viva-ready implementation documentation.
 
-Implemented scope: first-person movement, CharacterController collision, gravity/grounding, mouse look, cursor handling, interaction raycast/range, and baseline player controller setup in the greybox builder.
-
-Not included yet: combat/health refinement, physical-door refinement, Storage section redesign, Flanker scoring, or Flanker fallback. Those remain separate branches according to `docs/members/NIMSARA_IMPLEMENTATION_PLAN.md`.
+After local Unity testing, push the branch and open the PR to `dev`.

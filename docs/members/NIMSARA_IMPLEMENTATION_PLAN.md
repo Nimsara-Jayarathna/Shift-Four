@@ -85,7 +85,7 @@ Assets/Scripts/AI/Movement/DroneMotor.cs
 
 The baseline already has basic player movement, mouse look, shooting, interaction raycasts, health/recovery, a sliding physical door, Flanker left/right candidate logic, A* calls, drone line-of-sight attacks, and route recalculation.
 
-**Therefore your job is not to delete everything and start again.** Your work is to understand it, test it, improve it, separate your responsibility cleanly, add missing edge cases, and produce real Git evidence as you develop it.
+**Therefore your job is not to delete everything and start again.** Your work is to understand it, test it, improve it, separate your responsibility cleanly, add missing edge cases, and produce real Git evidence as you dev it.
 
 ---
 
@@ -96,29 +96,29 @@ main
   ^
   |  release PR only
   |
-develop
+dev
   ^
   |  normal PRs
   |
-feature/gv-nimsara-*
-feature/is-nimsara-*
-fix/nimsara-*
+feature/gv-IT24103464-*
+feature/IS-IT24103464-*
+fix/IT24103464-*
 ```
 
 ## `main`
 
-Stable/demo/submission branch. Do not develop directly on it.
+Stable/demo/submission branch. Do not dev directly on it.
 
-## `develop`
+## `dev`
 
-Shared team integration branch. Every normal task starts from the latest `develop` and returns through a PR.
+Shared team integration branch. Every normal task starts from the latest `dev` and returns through a PR.
 
 ## Your first branch
 
 **Start with:**
 
 ```text
-feature/gv-nimsara-player-physics
+feature/gv-IT24103464-player-physics
 ```
 
 This is your first implementation branch because player movement/collision/interactions are the foundation for your Systems Engineer work and the rest of your testing.
@@ -127,29 +127,29 @@ This is your first implementation branch because player movement/collision/inter
 
 # 4. Before writing code - exact Git commands
 
-If `develop` already exists remotely:
+If `dev` already exists remotely:
 
 ```bash
-git switch develop
-git pull origin develop
-git switch -c feature/gv-nimsara-player-physics
+git switch dev
+git pull origin dev
+git switch -c feature/gv-IT24103464-player-physics
 ```
 
-If the team has not created `develop` yet, the repository owner/integrator should create it once from the verified baseline:
+If the team has not created `dev` yet, the repository owner/integrator should create it once from the verified baseline:
 
 ```bash
 git switch main
 git pull origin main
-git switch -c develop
-git push -u origin develop
+git switch -c dev
+git push -u origin dev
 ```
 
 Then you do:
 
 ```bash
-git switch develop
-git pull origin develop
-git switch -c feature/gv-nimsara-player-physics
+git switch dev
+git pull origin dev
+git switch -c feature/gv-IT24103464-player-physics
 ```
 
 Never begin by coding directly on `main`.
@@ -158,19 +158,19 @@ Never begin by coding directly on `main`.
 
 # 5. Your complete branch sequence
 
-Use this sequence. Do not create all branches at once. Finish, test, PR, and merge one task before creating the next from the updated `develop`.
+Use this sequence. Do not create all branches at once. Finish, test, PR, and merge one task before creating the next from the updated `dev`.
 
 | Order | Branch | Main purpose |
 |---|---|---|
-| 1 | `feature/gv-nimsara-player-physics` | Player movement, collision, mouse look, interaction foundation |
-| 2 | `feature/gv-nimsara-combat-health` | Shooting, damage, cover blocking, health, recovery, death state |
-| 3 | `feature/gv-nimsara-door-physics` | Physical shortcut door + collider + navigation-state event |
-| 4 | `feature/gv-nimsara-storage-section` | Storage routes, shelves, cover, door area |
-| 5 | `feature/is-nimsara-flanker-scoring` | Proper utility-scored flank choices using reachability/path cost |
-| 6 | `feature/is-nimsara-flanker-fallback` | Replanning, cooldown/hysteresis, invalid/no-route fallbacks |
-| 7 | `fix/nimsara-integration-polish` | Only genuine integration defects found after team merge |
+| 1 | `feature/gv-IT24103464-player-physics` | Player movement, collision, mouse look, interaction foundation |
+| 2 | `feature/gv-IT24103464-combat-health` | Shooting, damage, cover blocking, health, recovery, death state |
+| 3 | `feature/gv-IT24103464-door-physics` | Physical shortcut door + collider + navigation-state event |
+| 4 | `feature/gv-IT24103464-storage-section` | Storage routes, shelves, cover, door area |
+| 5 | `feature/IS-IT24103464-flanker-scoring` | Proper utility-scored flank choices using reachability/path cost |
+| 6 | `feature/IS-IT24103464-flanker-fallback` | Replanning, cooldown/hysteresis, invalid/no-route fallbacks |
+| 7 | `fix/IT24103464-integration-polish` | Only genuine integration defects found after team merge |
 
-Do not make one giant `feature/nimsara-everything` branch.
+Do not make one giant `feature/everything` branch.
 
 ---
 
@@ -225,7 +225,7 @@ ProjectSettings/
 ## Branch
 
 ```text
-feature/gv-nimsara-player-physics
+feature/gv-IT24103464-player-physics
 ```
 
 ## Main files
@@ -290,15 +290,15 @@ You can demonstrate player movement/collision/interactions for 1 minute without 
 ## Branch
 
 ```text
-feature/gv-nimsara-combat-health
+feature/gv-IT24103464-combat-health
 ```
 
 Create it only after Branch 1 is merged:
 
 ```bash
-git switch develop
-git pull origin develop
-git switch -c feature/gv-nimsara-combat-health
+git switch dev
+git pull origin dev
+git switch -c feature/gv-IT24103464-combat-health
 ```
 
 ## Main files
@@ -379,7 +379,7 @@ You can deliberately demonstrate **take damage -> hide behind cover -> survive -
 ## Branch
 
 ```text
-feature/gv-nimsara-door-physics
+feature/gv-IT24103464-door-physics
 ```
 
 ## Main file
@@ -460,7 +460,7 @@ You can show the lecturer the door working physically and then show that its ope
 ## Branch
 
 ```text
-feature/gv-nimsara-storage-section
+feature/gv-IT24103464-storage-section
 ```
 
 ## Goal
@@ -506,7 +506,7 @@ fix(gv): widen storage route for player and drone clearance
 ## Branch
 
 ```text
-feature/is-nimsara-flanker-scoring
+feature/IS-IT24103464-flanker-scoring
 ```
 
 ## Main file
@@ -654,7 +654,7 @@ You can pause/explain the code and state exactly why one candidate scored higher
 ## Branch
 
 ```text
-feature/is-nimsara-flanker-fallback
+feature/IS-IT24103464-flanker-fallback
 ```
 
 ## Required edge cases
@@ -739,7 +739,7 @@ fix(is): reselect flank after door invalidates route
 Use this only after your completed work has merged and a real integration bug appears.
 
 ```text
-fix/nimsara-integration-polish
+fix/IT24103464-integration-polish
 ```
 
 Do not hide unfinished features inside a generic polish branch.
@@ -775,7 +775,7 @@ git push -u origin YOUR_BRANCH_NAME
 Open PR:
 
 ```text
-YOUR_BRANCH -> develop
+YOUR_BRANCH -> dev
 ```
 
 ## PR description must contain
@@ -797,8 +797,8 @@ Use **Create a merge commit** for assessed work so your genuine individual commi
 After merge:
 
 ```bash
-git switch develop
-git pull origin develop
+git switch dev
+git pull origin dev
 ```
 
 Then create the next branch.
@@ -860,8 +860,8 @@ Rule: **You do not own A*; you own the Flanker's decision about which destinatio
 - open project;
 - verify no blocking compile errors;
 - test current movement/door/health/Flanker;
-- ensure `develop` exists;
-- create `feature/gv-nimsara-player-physics`;
+- ensure `dev` exists;
+- create `feature/gv-IT24103464-player-physics`;
 - read every line of `PlayerController.cs` you will touch.
 
 ## 5 Oct - player physics
@@ -869,7 +869,7 @@ Rule: **You do not own A*; you own the Flanker's decision about which destinatio
 - movement/collision/mouse/interactions;
 - tests;
 - 1-3 meaningful commits;
-- PR to `develop`.
+- PR to `dev`.
 
 ## 6 Oct - combat + health
 
@@ -933,7 +933,7 @@ Rule: **You do not own A*; you own the Flanker's decision about which destinatio
 - no new mechanics;
 - regression fixes only;
 - test desktop build;
-- help verify `develop -> main` release.
+- help verify `dev -> main` release.
 
 ## 21 Oct - GV submission/showcase
 
@@ -983,7 +983,7 @@ Your work is complete only when all of these are true.
 
 ## Git / evidence
 
-- [ ] Work was done on short branches from `develop`.
+- [ ] Work was done on short branches from `dev`.
 - [ ] Commits are truthful and descriptive.
 - [ ] No fake backdated/no-op commits.
 - [ ] PRs show tests and ownership.
@@ -1075,9 +1075,9 @@ When we start implementation together, do exactly this:
 ```text
 [ ] Open Terminal in the repository
 [ ] git status
-[ ] git switch develop
-[ ] git pull origin develop
-[ ] git switch -c feature/gv-nimsara-player-physics
+[ ] git switch dev
+[ ] git pull origin dev
+[ ] git switch -c feature/gv-IT24103464-player-physics
 [ ] Open project in Unity
 [ ] Open MainLab
 [ ] Clear Console
@@ -1105,28 +1105,28 @@ Your development path is:
 BASELINE VERIFY
       |
       v
-feature/gv-nimsara-player-physics
+feature/gv-IT24103464-player-physics
       |
       v
-feature/gv-nimsara-combat-health
+feature/gv-IT24103464-combat-health
       |
       v
-feature/gv-nimsara-door-physics
+feature/gv-IT24103464-door-physics
       |
       v
-feature/gv-nimsara-storage-section
+feature/gv-IT24103464-storage-section
       |
       v
-feature/is-nimsara-flanker-scoring
+feature/IS-IT24103464-flanker-scoring
       |
       v
-feature/is-nimsara-flanker-fallback
+feature/IS-IT24103464-flanker-fallback
       |
       v
 TEAM INTEGRATION
       |
       v
-fix/nimsara-integration-polish   (only if actually needed)
+fix/IT24103464-integration-polish   (only if actually needed)
       |
       v
 VIVA + EVIDENCE + RELEASE

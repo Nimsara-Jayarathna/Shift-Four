@@ -35,4 +35,4 @@ The A* graph chooses a **high-level sequence of sections**; NavMeshAgent moves l
 - `Assets/Scripts/Gameplay/`: player, door, console, health, exit, led by Member 2.
 - `ArtSource/`: original editable `.blend` source kept by Member 3; exported Unity models go in `Assets/Models/` after import.
 
-This baseline intentionally uses placeholder cubes. Students replace or develop them through their own assessable contributions. The small graph is easy to explain but still needs route demonstrations, tests and tuning in the actual game.
+This baseline intentionally uses placeholder cubes. Students replace or dev them through their own assessable contributions. The small graph is easy to explain but still needs route demonstrations, tests and tuning in the actual game.

@@ -1,44 +1,50 @@
-# Nimsara - Student 2: Systems Engineer and Flanker
+# Student 2 / IT24103464 - Systems Engineer and Flanker
 
-**Official GV role:** Systems Engineer
-**Section:** Storage
+**Official GV role:** Systems Engineer  
+**Section:** Storage  
 **IS agent:** Flanker
 
-Your GV evidence is centered on **player physics and environmental interaction**. Your IS evidence is the Flanker's distinct side-route decision logic. The complete locked sequence is in [NIMSARA_IMPLEMENTATION_PLAN.md](NIMSARA_IMPLEMENTATION_PLAN.md).
+Your GV evidence is player physics/environmental interaction. Your IS evidence is the Flanker's distinct tactical decision logic.
 
-## Branch sequence
+## Exact branch names
 
-1. `feature/gv-nimsara-player-physics`
-2. `feature/gv-nimsara-combat-health`
-3. `feature/gv-nimsara-door-physics`
-4. `feature/gv-nimsara-storage-section`
-5. `feature/is-nimsara-flanker-scoring`
-6. `feature/is-nimsara-flanker-fallback`
-7. `fix/nimsara-integration-polish` only for genuine integration defects
+Current/created branches:
 
-Finish, test, PR, and merge one branch before creating the next from updated `develop`.
+```text
+feature/gv-IT24103464-player-physics
+feature/IS-IT24103464-flanker-scoring
+```
 
-## Current branch: player physics
+Planned follow-up branches:
 
-The implementation notes and test checklist are in:
+```text
+feature/gv-IT24103464-combat-health
+feature/gv-IT24103464-door-physics
+feature/gv-IT24103464-storage-section
+feature/IS-IT24103464-flanker-fallback
+fix/IT24103464-integration-polish
+```
 
-[feature/gv-nimsara-player-physics](../branches/feature-gv-nimsara-player-physics.md)
+Normal PR target: `dev`.
 
-This branch owns:
+## Current IS branch
 
-- first-person WASD movement;
-- normalized diagonal movement;
-- `CharacterController` collision;
-- gravity and grounded handling;
-- mouse yaw + clamped camera pitch;
-- cursor lock/release/relock behavior;
-- forward interaction raycast and range;
-- stopping player input after death/end state.
+`feature/IS-IT24103464-flanker-scoring` is split into three implementation checkpoints so the code can be developed and understood progressively instead of arriving as one giant change.
 
-It intentionally leaves the later combat/health, door, Storage-layout, and Flanker work to their own branches.
+Read:
 
-## Your later assessed work
+- [`../branches/IT24103464_FLANKER_3_DAY_COMMIT_PLAN.md`](../branches/IT24103464_FLANKER_3_DAY_COMMIT_PLAN.md)
+- [`../branches/feature-IS-IT24103464-flanker-scoring.md`](../branches/feature-IS-IT24103464-flanker-scoring.md)
 
-After this branch is merged, continue with combat/health/cover, then the physical shortcut door and its navigation-state handoff, then Storage geometry, and finally the Flanker's utility-scored left/right route selection and fallback behavior.
+The final Flanker should:
 
-**Do not replace your required Systems Engineer work with UI tasks.** Nimthara owns the reusable console/HUD/outcome presentation as the team's workload balance.
+- use visible or remembered target information rather than hidden live position;
+- create meaningful left/right tactical candidates;
+- validate them on NavMesh and the shared route graph;
+- include actual A* route length in utility scoring;
+- use a clear firing-line/range/lateral rationale;
+- fall back safely when no flank is valid;
+- avoid decision jitter through a small commitment and switch threshold;
+- expose enough diagnostics that the decision can be explained in the viva.
+
+Shared A* search remains Asmadala's implementation responsibility. This branch owns the **Flanker's tactical use of that route information**.

@@ -24,7 +24,7 @@ If **Tools > Shift Four** is absent, a compiler/package error prevented the edit
 - A small shared A* graph for room-to-room route choice and a NavMeshAgent-based route follower. The door changes the graph edge and NavMesh obstacle.
 - An editor generator that creates **separate Unity prefabs**, so each member can own their section and drone without editing the main scene together.
 
-**This is an initial baseline, not a finished submission.** The drones use simple starter policies, art is made of Unity primitives, and movement feedback is basic. Each student must develop their own assessed component, make regular attributable commits, test it, and explain it in the viva. Unity is not available in the archive-generation environment, so the generated scene must be opened and verified in your local Editor before treating it as a working build.
+**This is an initial baseline, not a finished submission.** The drones use simple starter policies, art is made of Unity primitives, and movement feedback is basic. Each student must dev their own assessed component, make regular attributable commits, test it, and explain it in the viva. Unity is not available in the archive-generation environment, so the generated scene must be opened and verified in your local Editor before treating it as a working build.
 
 ## Individual work
 
@@ -48,4 +48,12 @@ Write names in [the ownership table](docs/SCOPE.md#4-team-ownership) before the 
 
 ## Repository rule
 
-Use **one repo and one Unity project**. `main` stays playable. Short branches and non-squashed pull requests preserve every student's history. Commit `Assets/`, `Packages/`, `ProjectSettings/`, `ArtSource/`, docs, and all `.meta` files. Do not commit Unity's generated `Library/`, `Temp/`, or build output. If the two courses ask for separate submissions, use the same source project and prepare the requested evidence for each course.
+Use **one repo and one Unity project**. `main` is stable and `dev` is the team integration branch. Normal short-lived branches PR into `dev`; promote a tested `dev` to `main`. Commit `Assets/`, `Packages/`, `ProjectSettings/`, `ArtSource/`, docs, and all `.meta` files. Do not commit Unity's generated `Library/`, `Temp/`, or build output. If the two courses ask for separate submissions, use the same source project and prepare the requested evidence for each course.
+
+## Current Student 2 IS branch snapshot
+
+**Branch:** `feature/IS-IT24103464-flanker-scoring`  
+**PR target:** `dev`  
+**Snapshot:** Checkpoint 3 / Final - stable decisions and diagnostics
+
+Read [`BRANCH_STATUS.md`](BRANCH_STATUS.md) and the [three-checkpoint commit plan](docs/branches/IT24103464_FLANKER_3_DAY_COMMIT_PLAN.md) before applying or committing this snapshot.
