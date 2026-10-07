@@ -5,9 +5,13 @@ using UnityEngine.AI;
 namespace ShiftFour
 {
     /// <summary>
-    /// IT24103464 - Flanker checkpoint 2.
-    /// Extends the tactical candidates with actual A* route cost, firing-line
-    /// quality and route-aware fallbacks.
+    /// IT24103464 - Flanker IS agent.
+    ///
+    /// The Flanker does not simply chase the player. It generates tactical candidate
+    /// positions on both sides of the latest observed player position, validates them
+    /// against the NavMesh and shared A* graph, assigns a utility score, then commits
+    /// to the best useful action for a short period so it does not oscillate every
+    /// decision tick.
     /// </summary>
     public sealed class FlankerBrain : DroneBrain
     {
@@ -20,12 +24,39 @@ namespace ShiftFour
         [SerializeField, Min(1f)] private float preferredAttackDistance = 5f;
 
         [Header("Utility weights")]
+        [Tooltip("Reward for approaching the target from roughly 90 degrees to the current direct line.")]
         [SerializeField, Min(0f)] private float lateralWeight = 30f;
+        [Tooltip("Reward for a candidate that would have an unobstructed firing line to the remembered target point.")]
         [SerializeField, Min(0f)] private float firingLineWeight = 14f;
+        [Tooltip("Reward for ending near the desired attack distance.")]
         [SerializeField, Min(0f)] private float rangeWeight = 12f;
+        [Tooltip("Penalty applied per metre of A* route length.")]
         [SerializeField, Min(0f)] private float routeCostWeight = 1.15f;
 
-        private readonly List<Candidate> candidates = new List<Candidate>(4);
+        [Header("Decision stability")]
+        [Tooltip("Minimum time a valid flank choice is kept before normal switching is allowed.")]
+        [SerializeField, Min(0f)] private float minimumCommitSeconds = 1.4f;
+        [Tooltip("A new option must beat the current option by this score after the commit window.")]
+        [SerializeField, Min(0f)] private float switchMargin = 6f;
+
+        [Header("Viva / diagnostics")]
+        [SerializeField] private bool logDecisionChanges = true;
+        [SerializeField] private bool drawCandidateGizmos = true;
+
+        private readonly List<Candidate> candidates = new List<Candidate>(5);
+
+        private string committedName = string.Empty;
+        private Vector3 committedDestination;
+        private float committedScore = float.NegativeInfinity;
+        private float commitUntil;
+        private string lastLoggedDecision = string.Empty;
+
+        private Vector3 lastLeftCandidate;
+        private Vector3 lastRightCandidate;
+        private bool lastLeftValid;
+        private bool lastRightValid;
+
+        public string DecisionTrace { get; private set; } = "No decision yet";
 
         private struct Candidate
         {
@@ -49,11 +80,21 @@ namespace ShiftFour
 
             candidates.Clear();
 
+            // No recent information: return to our assigned storage post instead of
+            // pretending the agent knows the player's hidden live position.
             if (!remembersTarget)
-                return new DecisionOption("Hold storage", Home, 18f);
+            {
+                Candidate hold = BuildSimpleCandidate("Hold storage", Home, 18f);
+                return CommitOrKeep(hold, true).ToOption();
+            }
 
+            // A visible player already inside close combat range is an emergency
+            // override. Flanking at this distance would look irrational.
             if (visible && distance <= 3.5f)
-                return new DecisionOption("Engage close target", target, 95f);
+            {
+                Candidate engage = BuildSimpleCandidate("Engage close target", target, 95f);
+                return CommitOrKeep(engage, true).ToOption();
+            }
 
             Vector3 fromAgentToTarget = target - transform.position;
             fromAgentToTarget.y = 0f;
@@ -65,24 +106,30 @@ namespace ShiftFour
             Vector3 direct = fromAgentToTarget.normalized;
             Vector3 lateral = new Vector3(-direct.z, 0f, direct.x);
 
-            candidates.Add(EvaluateFlankCandidate(
-                "Flank left",
-                target + lateral * flankRadius,
-                target));
+            Candidate left = EvaluateFlankCandidate("Flank left", target + lateral * flankRadius, target);
+            Candidate right = EvaluateFlankCandidate("Flank right", target - lateral * flankRadius, target);
+            candidates.Add(left);
+            candidates.Add(right);
 
-            candidates.Add(EvaluateFlankCandidate(
-                "Flank right",
-                target - lateral * flankRadius,
-                target));
+            lastLeftCandidate = left.Destination;
+            lastRightCandidate = right.Destination;
+            lastLeftValid = left.Valid;
+            lastRightValid = right.Valid;
 
-            candidates.Add(EvaluateFallbackRoute(
+            // Pursuit is deliberately weaker than a healthy flank, but remains a
+            // sensible fallback when shelves, a door state, or graph connectivity
+            // makes both lateral positions unavailable.
+            Candidate pursue = EvaluateFallbackRoute(
                 visible ? "Pursue visible target" : "Pursue last sighting",
                 target,
-                visible ? 48f : 36f));
+                visible ? 48f : 36f);
+            candidates.Add(pursue);
 
-            candidates.Add(EvaluateFallbackRoute("Hold storage", Home, 16f));
+            Candidate holdStorage = EvaluateFallbackRoute("Hold storage", Home, 16f);
+            candidates.Add(holdStorage);
 
-            return BestValidCandidate(candidates).ToOption();
+            Candidate best = BestValidCandidate(candidates);
+            return CommitOrKeep(best, false).ToOption();
         }
 
         private Candidate EvaluateFlankCandidate(string label, Vector3 rawPosition, Vector3 target)
@@ -107,12 +154,13 @@ namespace ShiftFour
             result.RangeQuality = RangeQuality(snapped, target);
             result.ClearFiringLine = HasClearLineToRememberedTarget(snapped, target);
 
+            // Utility score = useful tactical properties minus travel expense.
+            // Keeping the components explicit makes the decision explainable in viva.
             result.Score = 42f
                 + result.LateralQuality * lateralWeight
                 + result.RangeQuality * rangeWeight
                 + (result.ClearFiringLine ? firingLineWeight : 0f)
                 - result.RouteCost * routeCostWeight;
-
             result.Valid = true;
             return result;
         }
@@ -140,24 +188,92 @@ namespace ShiftFour
             return result;
         }
 
-        private Candidate BestValidCandidate(List<Candidate> options)
+        private Candidate BuildSimpleCandidate(string label, Vector3 destination, float score)
         {
-            Candidate best = new Candidate
+            if (TrySnapToNavMesh(destination, out Vector3 snapped))
+                destination = snapped;
+
+            return new Candidate
             {
-                Name = "Hold storage",
-                Destination = Home,
-                Score = 8f,
+                Name = label,
+                Destination = destination,
+                Score = score,
+                RouteCost = 0f,
                 Valid = true
             };
+        }
 
+        private Candidate BestValidCandidate(List<Candidate> options)
+        {
+            Candidate best = BuildSimpleCandidate("Hold storage", Home, 8f);
             for (int i = 0; i < options.Count; i++)
             {
                 Candidate option = options[i];
                 if (option.Valid && option.Score > best.Score)
                     best = option;
             }
-
             return best;
+        }
+
+        private Candidate CommitOrKeep(Candidate best, bool forceSwitch)
+        {
+            bool committedStillReachable = !string.IsNullOrEmpty(committedName)
+                && TryMeasureRoute(committedDestination, out _);
+
+            Candidate selected = best;
+            bool keepExisting = false;
+
+            if (!forceSwitch && committedStillReachable)
+            {
+                if (Time.time < commitUntil)
+                {
+                    keepExisting = true;
+                }
+                else if (TryFindCandidate(committedName, out Candidate currentCandidate)
+                    && currentCandidate.Valid
+                    && best.Score < currentCandidate.Score + switchMargin)
+                {
+                    keepExisting = true;
+                    committedScore = currentCandidate.Score;
+                    committedDestination = currentCandidate.Destination;
+                }
+            }
+
+            if (keepExisting)
+            {
+                selected = new Candidate
+                {
+                    Name = committedName,
+                    Destination = committedDestination,
+                    Score = committedScore,
+                    Valid = true
+                };
+            }
+            else
+            {
+                committedName = best.Name;
+                committedDestination = best.Destination;
+                committedScore = best.Score;
+                commitUntil = Time.time + minimumCommitSeconds;
+            }
+
+            UpdateDiagnostics(selected);
+            return selected;
+        }
+
+        private bool TryFindCandidate(string name, out Candidate candidate)
+        {
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                if (candidates[i].Name == name)
+                {
+                    candidate = candidates[i];
+                    return true;
+                }
+            }
+
+            candidate = default;
+            return false;
         }
 
         private bool TrySnapToNavMesh(Vector3 point, out Vector3 snapped)
@@ -189,7 +305,6 @@ namespace ShiftFour
                 routeCost += Vector3.Distance(previous, route[i]);
                 previous = route[i];
             }
-
             return true;
         }
 
@@ -204,6 +319,7 @@ namespace ShiftFour
                 return 0f;
 
             float angle = Vector3.Angle(originalFromTarget, candidateFromTarget);
+            // 90 degrees is a true side approach. 0 or 180 is not useful flanking.
             return Mathf.Clamp01(1f - Mathf.Abs(angle - 90f) / 90f);
         }
 
@@ -223,12 +339,52 @@ namespace ShiftFour
             if (distance < 0.1f)
                 return true;
 
-            return !Physics.Raycast(
-                origin,
-                vector.normalized,
-                distance - 0.15f,
-                ~0,
-                QueryTriggerInteraction.Ignore);
+            // This ray is aimed at the observed/remembered target point, not at the
+            // player's hidden live Transform, so it does not grant wall-hack knowledge.
+            return !Physics.Raycast(origin, vector.normalized, distance - 0.15f,
+                ~0, QueryTriggerInteraction.Ignore);
+        }
+
+        private void UpdateDiagnostics(Candidate selected)
+        {
+            string left = CandidateSummary("L", "Flank left");
+            string right = CandidateSummary("R", "Flank right");
+            string pursue = CandidateSummary("P", "Pursue visible target");
+            if (pursue.EndsWith("invalid"))
+                pursue = CandidateSummary("P", "Pursue last sighting");
+
+            DecisionTrace = $"{selected.Name} ({selected.Score:0.0}) | {left} | {right} | {pursue}";
+
+            if (logDecisionChanges && selected.Name != lastLoggedDecision)
+            {
+                Debug.Log($"[Flanker:{AgentName}] {DecisionTrace}", this);
+                lastLoggedDecision = selected.Name;
+            }
+        }
+
+        private string CandidateSummary(string shortName, string candidateName)
+        {
+            if (!TryFindCandidate(candidateName, out Candidate candidate) || !candidate.Valid)
+                return $"{shortName}:invalid";
+            return $"{shortName}:{candidate.Score:0.0}/path:{candidate.RouteCost:0.0}";
+        }
+
+        private void OnDrawGizmosSelected()
+        {
+            if (!drawCandidateGizmos)
+                return;
+
+            if (lastLeftValid)
+            {
+                Gizmos.DrawWireSphere(lastLeftCandidate + Vector3.up * 0.2f, 0.45f);
+                Gizmos.DrawLine(transform.position, lastLeftCandidate);
+            }
+
+            if (lastRightValid)
+            {
+                Gizmos.DrawWireSphere(lastRightCandidate + Vector3.up * 0.2f, 0.45f);
+                Gizmos.DrawLine(transform.position, lastRightCandidate);
+            }
         }
     }
 }

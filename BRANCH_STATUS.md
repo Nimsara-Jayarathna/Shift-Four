@@ -1,24 +1,18 @@
-# Branch Snapshot Status - Checkpoint 2
+# Branch Snapshot Status - Checkpoint 3 / Final
 
 **Branch:** `feature/IS-IT24103464-flanker-scoring`  
 **Base / PR target:** `dev`  
-**Checkpoint:** 2 of 3  
-**Recommended commit:** `feat(is): score A-star flank routes and firing positions`
+**Checkpoint:** 3 of 3 - branch implementation complete  
+**Recommended commit:** `feat(is): stabilize flanker decisions and add diagnostics`
 
-Adds on top of Checkpoint 1:
+Adds on top of Checkpoint 2:
 
-- actual `WaypointGraph.FindRoute()` route measurement;
-- invalid/no-route candidate rejection;
-- A* route-length penalty;
-- firing-line reward;
-- route-aware pursuit and Storage fallbacks;
-- best-valid-candidate selection.
-
-Not implemented yet:
-
-- commitment window;
+- minimum decision commitment;
 - switch margin / hysteresis;
-- decision-change logging;
-- Scene-view candidate gizmos.
+- route-invalidity override;
+- decision diagnostics;
+- Scene-view flank candidate gizmos;
+- final fallback behavior;
+- viva-ready implementation documentation.
 
-Open and test this snapshot before committing it. Then move to Checkpoint 3.
+After local Unity testing, push the branch and open the PR to `dev`.
