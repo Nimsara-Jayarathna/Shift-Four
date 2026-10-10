@@ -22,7 +22,7 @@ namespace ShiftFour
             if (activated) return;
             activated = true;
             if (display != null) display.material.color = new Color(0.23f, 0.85f, 0.56f);
-            GameSession.Instance?.ConsoleActivated();
+            GameSession.Instance?.ConsoleActivated(sectionName);
         }
     }
 }
