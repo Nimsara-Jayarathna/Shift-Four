@@ -1,21 +1,44 @@
-# Member 3 — Model Creator and Guard
+> **V3 graphics-first update:** Before implementing your room, read [Graphics-first master plan](../GRAPHICS_FIRST_MASTER_PLAN.md), [level blueprint](../LEVEL_BLUEPRINT.md), [style guide](../VISUAL_STYLE_GUIDE.md) and [per-model briefs](../../ArtSource/Models/README.md). The proposal adds fully enclosed roof/floor/ceiling/lights, AI-specific cover, and three hinged console doors while preserving your official GV/IS assessment role. The baseline still uses the old scene until a later implementation PR.
 
-**Your IS assessment:** the Guard's cover decisions. **Your GV assessment:** create and import at least **two original 3D models**, with sensible topology and UV mapping. You own the Server section.
+---
 
-## Start from the baseline
+# Nimthara - Student 3: Core Developer and Guard
 
-Open `Assets/Prefabs/Sections/Server.prefab`, `Assets/Prefabs/Agents/Guard.prefab`, and `Assets/Scripts/AI/Agents/GuardBrain.cs`. The drone and door visuals are placeholders. Create the replacements yourself in Blender; keep the editable source in `ArtSource/` and the exported models in `Assets/Models/`.
+**Official GV role:** Core Developer  
+**IS agent:** Guard  
+**Section:** Server
+
+Your assessed GV responsibility is at least two original 3D models created from scratch with topology/UV evidence and correct Unity import. Use a **security drone** and **lab door**. Your assessed IS responsibility is the Guard's cover-selection behavior. As workload balance, you also own reusable consoles, HUD progress, and win/lose/restart presentation.
 
 ## Work in this order
 
-1. Model **one drone** and **one sliding lab door** from scratch in Blender. Use simple low-polygon geometry suitable for a small game. Apply transforms, unwrap UVs, assign a small consistent material palette, and keep screenshots of mesh topology and UVs for your viva.
-2. Export each model in a Unity-friendly format such as FBX. Import it into `Assets/Models/`. Check orientation, scale, materials, shading and mesh pivots in Unity. Retain both the `.blend` and exported files in Git (use Git LFS only if the binaries become unusually large and the whole team agrees).
-3. Replace the **visual child** of the four drone prefabs with your shared drone model or a model prefab variant. Keep the NavMeshAgent, capsule collider, health, motor and brain components on each drone root. Replace the visual child of the sliding door while preserving its root collider, Rigidbody and `LabDoor` component. Coordinate any main-scene door edit with Member 1.
-4. Arrange fixed server racks/pillars in your Server prefab. Pick reachable `coverPoints` for the Guard; avoid points inside colliders. In `GuardBrain.cs`, improve protection, travel distance and exposed-cover scoring and add a useful fallback when no cover point is viable.
-5. Run with all four drones and inspect imported asset size and frame rate. Do not let a detailed model hide its colours or interfere with raycast shooting.
+1. Draft the security drone and lab door early in Blender. Keep geometry simple enough for a small real-time game.
+2. Apply transforms, create sensible topology, unwrap UVs, and use a consistent material palette. Keep screenshots and editable `.blend` sources in `ArtSource/`.
+3. Import/export through `Assets/Models/`, then verify orientation, scale, materials, shading, and pivots in Unity.
+4. Replace **visual children** only; preserve gameplay roots/components. Coordinate the door visual with Nimsara and drone hierarchy/animation with Asmadala.
+5. Implement/own reusable console interaction, four unique console instances/progress, HUD counters, exit gating, win/lose/restart presentation. Prevent duplicate console counting.
+6. Arrange Server racks/pillars and reachable cover points.
+7. In `GuardBrain.cs`, score cover by protection, route cost, and firing visibility; relocate when exposed; add no-safe-cover fallback.
+8. Run with all four drones and confirm model complexity/materials do not cause visible performance or collider/raycast problems.
 
-## Evidence to produce
+## Branch examples
 
-Show both original editable Blender files, topology, UVs, Unity imports, the drone/door in the scene, and Guard changing cover after the player moves. Example commits: `feat(models): model and unwrap security drone`, `feat(models): import sliding door`, `feat(ai): score protected guard positions`.
+```text
+feature/gv-nimthara-drone-model
+feature/gv-nimthara-door-model
+feature/gv-nimthara-uv-import
+feature/shared-nimthara-console-hud
+feature/is-nimthara-guard-cover
+```
 
-**Done when:** the source proves both models are original, they render and animate correctly, the player and drones still collide/see/shoot correctly, and the Guard can justify its cover choice and fallback.
+## Evidence
+
+- both editable Blender sources;
+- topology + UV mapping screenshots;
+- correct Unity import and model-in-game proof;
+- polygon/texture/optimization explanation;
+- reusable console/HUD/outcome proof;
+- Guard candidate cover scoring and relocation/fallback;
+- regular personal commits.
+
+**Done when:** both original models are defensible and integrated correctly, consoles/outcomes work without duplicate state, and Guard chooses/changes cover sensibly with an intentional fallback.

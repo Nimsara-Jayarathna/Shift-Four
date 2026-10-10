@@ -1,21 +1,44 @@
-# Member 1 — World Builder and Scout
+> **V3 graphics-first update:** Before implementing your room, read [Graphics-first master plan](../GRAPHICS_FIRST_MASTER_PLAN.md), [level blueprint](../LEVEL_BLUEPRINT.md), [style guide](../VISUAL_STYLE_GUIDE.md) and [per-model briefs](../../ArtSource/Models/README.md). The proposal adds fully enclosed roof/floor/ceiling/lights, AI-specific cover, and three hinged console doors while preserving your official GV/IS assessment role. The baseline still uses the old scene until a later implementation PR.
 
-**Your IS assessment:** the Scout's decisions. **Your GV assessment:** overall 3D layout, walkability/NavMesh, lighting, texturing, and visual coherence. You also arrange the Checkpoint section and integrate `MainLab.unity` after teammates finish their prefabs. Put your real name in `docs/SCOPE.md`.
+---
 
-## Start from the baseline
+# Pamudi - Student 1: World Builder and Scout
 
-Open `Assets/Prefabs/Sections/Checkpoint.prefab` in Prefab Mode. The floor, fixed cover, and console are placeholders. Open `Assets/Scripts/AI/Agents/ScoutBrain.cs`: it starts with patrol, gunshot investigation, and last-known-position search. Read `WaypointGraph.cs` and `DroneBrain.cs` to understand the shared interfaces before changing Scout. Do **not** rerun the greybox generator after the scene is committed.
+**Official GV role:** World Builder  
+**IS agent:** Scout  
+**Section:** Checkpoint
+
+Your assessed GV responsibility is the connected level layout, NavMesh, lighting, and texturing. Your assessed IS responsibility is the Scout's distinct decision behavior. You also coordinate `MainLab.unity` integration and waypoint locations/connections.
 
 ## Work in this order
 
-1. Sketch the four-section loop, the two alternate routes, cover sight lines, door shortcut and exit. Keep the four compact rooms. Adjust your own Checkpoint prefab and integrate teammates' prefabs by changing only the shared main scene when coordinated.
-2. Re-bake the NavMesh after major level changes: select **NavMesh surface — baked greybox** in `MainLab.unity`, bake in its Inspector, save the scene and NavMesh data. Walk every corridor and doorway with both the player and an agent. Make sure the door shortcut has another route when closed.
-3. Improve the shared materials and lighting, giving rooms recognisable visual cues without four unrelated art styles. Check cover collider heights: a full-height rack/pillar should block the drone's shot ray.
-4. In `ScoutBrain.cs`, show why a recent sound outranks patrol, why visible player sight outranks sound, and when stale information expires. Tune hearing range, search delay and patrol points. Keep its observations honest: if the player is behind a wall, the Scout uses the last known location rather than reading the current location.
-5. Test Scout with shots from outside its view, a hidden player, and the open/closed shortcut. Ensure it eventually returns to patrol and never waits at an unreachable point forever.
+1. Open the generated baseline and verify the four connected sections plus the alternate route around the shortcut door.
+2. Own the routine edits to `MainLab.unity`. Integrate teammates' section prefabs instead of asking everyone to edit the scene directly.
+3. Refine the Checkpoint and shared room kit. Keep the whole facility visually coherent.
+4. Place/maintain waypoint nodes and graph connections that correspond to real navigable routes.
+5. Re-bake and inspect the NavMesh after meaningful geometry changes. Test every corridor/doorway with player and agent.
+6. Improve lighting/materials/textures with a consistent palette and defend at least one optimization/design choice.
+7. In `ScoutBrain.cs`, make visible player pursuit outrank recent sound, recent sound outrank patrol, remember last-known position, search for a limited time, then return to patrol.
+8. Test hidden-player shots, lost sight, open/closed shortcut, unreachable destination, and return-to-patrol fallback.
 
-## Evidence to produce
+## Branch examples
 
-Show the examiner the alternate routes and baked NavMesh, one lighting/material choice and its performance effect, and Scout decisions in the HUD/code. Capture a small sequence of commits such as `feat(level): shape checkpoint alternate route`, `feat(ai): scout investigates gunfire`, `fix(nav): rebake room connections`.
+```text
+feature/gv-pamudi-level-layout
+feature/gv-pamudi-lighting-textures
+feature/gv-pamudi-navmesh
+feature/is-pamudi-scout-investigation
+feature/is-pamudi-scout-lost-target
+```
 
-**Done when:** all four sections remain reachable; the level looks like one facility; Scout patrols, investigates, searches, recovers from a failed search and replans on a changed route. You can trace one Scout choice and one A* route aloud.
+## Evidence
+
+- connected layout + alternate route;
+- visible NavMesh/rebake workflow;
+- lighting/texturing choice and optimization;
+- Scout sound/sight/last-known-position decision;
+- numerical priority/score/cooldown explanation;
+- lost-target fallback;
+- regular personal commits.
+
+**Done when:** all four sections remain reachable, the level looks like one facility, navigation areas are valid, and Scout investigates/searches/recoveries correctly without tracking through walls.
