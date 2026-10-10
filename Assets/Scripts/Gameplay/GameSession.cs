@@ -49,10 +49,13 @@ namespace ShiftFour
 
         private void Update()
         {
-            if (Ended && Input.GetKeyDown(KeyCode.R))
-                SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex >= 0
-                    ? SceneManager.GetActiveScene().buildIndex
-                    : SceneManager.GetActiveScene().name);
+            if (!Ended || !Input.GetKeyDown(KeyCode.R)) return;
+
+            Scene activeScene = SceneManager.GetActiveScene();
+            if (activeScene.buildIndex >= 0)
+                SceneManager.LoadScene(activeScene.buildIndex);
+            else
+                SceneManager.LoadScene(activeScene.name);
         }
 
         private void OnGUI()
