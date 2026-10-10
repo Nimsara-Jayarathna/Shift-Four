@@ -187,9 +187,7 @@ public static class BaselineSceneBuilder
     {
         GameObject root = new GameObject("Sliding shortcut door");
         root.transform.position = new Vector3(0f, 0f, -10f);
-        Cube("Door placeholder — replace with Blender model", root.transform,
-            new Vector3(0f, 1.2f, 0f), new Vector3(0.4f, 2.4f, 3.6f), metal)
-            .GetComponent<BoxCollider>().enabled = false;
+        ShiftFourModelInstaller.AddDoorVisual(root.transform);
         BoxCollider collider = root.AddComponent<BoxCollider>();
         collider.center = new Vector3(0f, 1.2f, 0f);
         collider.size = new Vector3(0.4f, 2.4f, 3.6f);
@@ -250,9 +248,7 @@ public static class BaselineSceneBuilder
         agent.height = 1.8f;
         agent.speed = 3.5f;
         agent.stoppingDistance = 1f;
-        GameObject visual = Cube("Drone placeholder — replace with Blender model", root.transform,
-            new Vector3(0f, 1.05f, 0f), new Vector3(1f, 0.45f, 0.85f), color);
-        UnityEngine.Object.DestroyImmediate(visual.GetComponent<BoxCollider>());
+        GameObject visual = ShiftFourModelInstaller.AddDroneVisual(root.transform, name);
         root.AddComponent<Health>().Configure(75f, false);
         root.AddComponent<DroneMotor>().Configure(visual.transform);
         root.AddComponent<T>();

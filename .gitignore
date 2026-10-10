@@ -90,3 +90,52 @@ Desktop.ini
 #   *.meta
 # They are required so every team member gets the same project configuration.
 # ---------------------------------------------------------------------------
+
+
+# Unity generated files
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+
+# Unity generated assets
+/Assets/AssetStoreTools*
+/Assets/StreamingAssets/aa.meta
+/Assets/StreamingAssets/aa/
+
+# IDE and editor
+.vs/
+.vscode/
+.idea/
+*.csproj
+*.sln
+*.slnx
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Crash dumps and temporary files
+sysinfo.txt
+*.tmp
+*.bak
+*.log
+
+# Blender backups (keep .blend files)
+*.blend1
+*.blend2
+
+# Never ignore Unity metadata!
+!*.meta
