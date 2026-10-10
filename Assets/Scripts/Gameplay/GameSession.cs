@@ -13,46 +13,23 @@ namespace ShiftFour
         public bool Ended { get; private set; }
 
         private string outcome = string.Empty;
-        private readonly string[] roomOrder = { "Checkpoint", "Server", "Control", "Storage" };
-        private readonly string[] droneOrder = { "Scout", "Guard", "Interceptor", "Flanker" };
         private DroneBrain[] drones;
-        private readonly System.Collections.Generic.HashSet<string> activatedRooms = new System.Collections.Generic.HashSet<string>();
 
         private void Awake()
         {
             Instance = this;
-            Graph = FindAnyObjectByType<WaypointGraph>();
-            Player = FindAnyObjectByType<PlayerController>();
+            Graph = FindFirstObjectByType<WaypointGraph>();
+            Player = FindFirstObjectByType<PlayerController>();
         }
 
         private void Start()
         {
-            drones = FindObjectsByType<DroneBrain>(FindObjectsInactive.Exclude);
+            drones = FindObjectsByType<DroneBrain>(FindObjectsSortMode.None);
             DronesRemaining = drones.Length;
             if (Player != null) Player.GetComponent<Health>().Died += _ => Finish("SYSTEM FAILURE — R to restart");
         }
 
-        public void ConsoleActivated(string room)
-        {
-            if (string.IsNullOrEmpty(room) || !activatedRooms.Add(room)) return;
-            ConsolesOnline++;
-        }
-        public bool IsRoomComplete(string room, string droneName)
-        {
-            if (!activatedRooms.Contains(room) || drones == null) return false;
-            foreach (DroneBrain drone in drones)
-                if (drone.AgentName == droneName)
-                    return !drone.GetComponent<Health>().IsAlive;
-            return false;
-        }
-        public string RoomProgress(string room, string droneName)
-        {
-            bool console = activatedRooms.Contains(room);
-            bool defeated = false;
-            if (drones != null) foreach (DroneBrain drone in drones)
-                if (drone.AgentName == droneName) defeated = !drone.GetComponent<Health>().IsAlive;
-            return defeated ? (console ? "ACCESS GRANTED" : "Activate " + room + " console") : "Defeat " + droneName + " drone";
-        }
+        public void ConsoleActivated() => ConsolesOnline++;
         public void DroneDestroyed() => DronesRemaining = Mathf.Max(0, DronesRemaining - 1);
 
         public void TryExit()
@@ -72,13 +49,10 @@ namespace ShiftFour
 
         private void Update()
         {
-            if (!Ended || !Input.GetKeyDown(KeyCode.R)) return;
-
-            Scene activeScene = SceneManager.GetActiveScene();
-            if (activeScene.buildIndex >= 0)
-                SceneManager.LoadScene(activeScene.buildIndex);
-            else
-                SceneManager.LoadScene(activeScene.name);
+            if (Ended && Input.GetKeyDown(KeyCode.R))
+                SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex >= 0
+                    ? SceneManager.GetActiveScene().buildIndex
+                    : SceneManager.GetActiveScene().name);
         }
 
         private void OnGUI()
@@ -87,14 +61,6 @@ namespace ShiftFour
             GUI.Box(new Rect(12, 12, 420, 104),
                 $"SHIFT FOUR\nHealth: {Player.GetComponent<Health>().Current:0} / 100    Consoles: {ConsolesOnline}/4    Drones: {DronesRemaining}\nWASD move  |  Mouse aim  |  Click fire  |  E interact  |  Escape unlock cursor");
             GUI.Label(new Rect(Screen.width / 2 - 8, Screen.height / 2 - 14, 24, 24), "+");
-            string objective = "Reach the exit";
-            for (int i = 0; i < roomOrder.Length; i++)
-                if (!IsRoomComplete(roomOrder[i], droneOrder[i]))
-                {
-                    objective = "ROOM " + (i + 1) + ": " + RoomProgress(roomOrder[i], droneOrder[i]);
-                    break;
-                }
-            GUI.Box(new Rect(12, 120, 420, 42), objective);
             if (drones != null)
             {
                 string status = "AGENT DECISIONS (viva view)\n";

@@ -10,9 +10,7 @@ namespace ShiftFour
         public int from;
         public int to;
         public bool doorShortcut;
-        public int gateId;
-        public GraphEdge(int a, int b, bool door) { from = a; to = b; doorShortcut = door; gateId = 0; }
-        public GraphEdge(int a, int b, int gate) { from = a; to = b; doorShortcut = true; gateId = gate; }
+        public GraphEdge(int a, int b, bool door) { from = a; to = b; doorShortcut = door; }
     }
 
     public sealed class WaypointGraph : MonoBehaviour
@@ -20,20 +18,12 @@ namespace ShiftFour
         [SerializeField] private Transform[] nodes;
         [SerializeField] private GraphEdge[] edges;
         [SerializeField] private bool doorOpen;
-        [SerializeField] private bool[] gatesOpen = new bool[4];
         public int Version { get; private set; }
 
         public void Configure(Transform[] waypoints, GraphEdge[] connections)
         {
             nodes = waypoints;
             edges = connections;
-        }
-
-        public void SetGateOpen(int id, bool open)
-        {
-            if (id < 0 || id >= gatesOpen.Length || gatesOpen[id] == open) return;
-            gatesOpen[id] = open;
-            Version++;
         }
 
         public void SetDoorOpen(bool open)
@@ -78,7 +68,7 @@ namespace ShiftFour
 
                 foreach (GraphEdge edge in edges)
                 {
-                    if (edge.doorShortcut && !(edge.gateId >= 0 && edge.gateId < gatesOpen.Length ? gatesOpen[edge.gateId] : doorOpen)) continue;
+                    if (edge.doorShortcut && !doorOpen) continue;
                     int next = edge.from == current ? edge.to : edge.to == current ? edge.from : -1;
                     if (next < 0 || next >= size || closed[next]) continue;
                     float candidate = cost[current] + Vector3.Distance(nodes[current].position, nodes[next].position);

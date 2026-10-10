@@ -1,21 +1,42 @@
-# Member 4 — Agent Controller and Interceptor
+> **V3 graphics-first update:** Before implementing your room, read [Graphics-first master plan](../GRAPHICS_FIRST_MASTER_PLAN.md), [level blueprint](../LEVEL_BLUEPRINT.md), [style guide](../VISUAL_STYLE_GUIDE.md) and [per-model briefs](../../ArtSource/Models/README.md). The proposal adds fully enclosed roof/floor/ceiling/lights, AI-specific cover, and three hinged console doors while preserving your official GV/IS assessment role. The baseline still uses the old scene until a later implementation PR.
 
-**Your IS assessment:** the Interceptor's prediction and fallback. **Your GV assessment:** smooth movement, turns and visible animation along paths. You own the Control section and shared `DroneMotor.cs`.
+---
 
-## Start from the baseline
+# Asmadala - Student 4: Agent Controller and Interceptor
 
-Open `Assets/Prefabs/Sections/Control.prefab`, `Assets/Scripts/AI/Agents/InterceptorBrain.cs`, and `Assets/Scripts/AI/Movement/DroneMotor.cs`. The motor already follows a list of A* points with `NavMeshAgent`, rotates toward velocity and adds a small hover motion. These are a starting point, not your complete animation evidence.
+**Official GV role:** Agent Controller  
+**IS agent:** Interceptor  
+**Section:** Control
+
+Your assessed GV responsibility is converting calculated paths into smooth agent movement, rotations, and animations. Your assessed IS responsibility is the Interceptor's predictive tactical behavior. You also own the shared A* implementation over Pamudi's waypoint graph.
 
 ## Work in this order
 
-1. Arrange the Control room and exit marker, leaving both entrance routes reachable. Coordinate edits to the exit/main scene with Member 1. Test drones returning from another room without clipping walls or turning abruptly.
-2. Improve waypoint arrival, turning speed, braking and path failure handling in `DroneMotor.cs`. The ordered points must turn into smooth motion. Test an open and closed shortcut, an unreachable goal and a moving player.
-3. Add simple, visible hover, fire, hit and shutdown/death feedback using a small Animator/Animation Clip setup or controlled procedural animation. Work with Member 3's drone model; preserve the colours identifying each agent. Explain how animation responds to motor/brain events.
-4. In `InterceptorBrain.cs`, score reachable junctions ahead of observed player movement, handle a player who stops or reverses direction, and fall back to last known position. Prediction uses **recent observed positions**, not a hidden read of the player's movement through a wall.
-5. Observe all four agents together for a full playthrough. Fix route loops, spinning, stuttering, and visible movement through a closed door. Keep route recalculation event-driven or on modest intervals.
+1. Prove A* on the small waypoint graph: costs, heuristic, parent reconstruction, ordered route, and explicit no-path result.
+2. In `DroneMotor.cs`, follow ordered route points smoothly with correct arrival, turning, braking, and re-route behavior. Do not move directly through geometry toward the player.
+3. Respond to Pamudi's graph data and Nimsara's door-state changes. Recalculate on relevant changes rather than every rendered frame.
+4. Add visible hover/fire/hit/shutdown/death animation feedback. Coordinate with Nimthara's drone visual hierarchy.
+5. Arrange Control-room junctions and the exit handoff without creating dead route ends.
+6. In `InterceptorBrain.cs`, estimate direction from **recent observed** player positions, score reachable junctions ahead, and recalculate when the prediction fails. Do not read hidden movement through walls.
+7. Test all four agents together, closed door, unreachable destination, reversing/stopped player, route loops, spinning, and stutter.
 
-## Evidence to produce
+## Branch examples
 
-Show the ordered path points, turning and animation transitions in the scene, a prediction that works, and a failed prediction with a reasonable fallback. Example commits: `feat(movement): smooth waypoint turns`, `feat(animation): drone fire and shutdown feedback`, `feat(ai): intercept ahead of player`.
+```text
+feature/shared-asmadala-a-star
+feature/gv-asmadala-route-following
+feature/gv-asmadala-drone-animation
+feature/is-asmadala-interceptor-prediction
+feature/is-asmadala-interceptor-fallback
+```
 
-**Done when:** all four agents move and animate convincingly along their chosen routes, Interceptor visibly picks a junction ahead, and you can explain both its prediction and a recovery case.
+## Evidence
+
+- explain A* `g`, `h`, `f`, parent reconstruction, and no-path behavior;
+- show ordered route points becoming smooth movement;
+- show movement/rotation/animation states;
+- justify path update frequency;
+- show successful prediction and failed-prediction fallback;
+- regular personal commits.
+
+**Done when:** all four agents route and animate smoothly, A* handles blocked/unreachable destinations, and Interceptor visibly chooses a defensible junction ahead with a safe fallback.
