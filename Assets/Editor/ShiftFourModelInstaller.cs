@@ -19,6 +19,7 @@ public static class ShiftFourModelInstaller
         result.transform.localPosition = new Vector3(0f, 1.05f, 0f);
         result.transform.localRotation = Quaternion.identity;
         result.transform.localScale = Vector3.one;
+        result.AddComponent<DroneRotorVisuals>();
         return result;
     }
 
@@ -79,8 +80,7 @@ public static class ShiftFourModelInstaller
                 {
                     // Replacing a prefab instance visual is an intentional scene override.
                     // The prefab itself was updated above, so only fix old placeholder overrides.
-                    if (root.GetComponent<DroneMotor>() != null &&
-                        true)
+                    if (root.GetComponent<DroneMotor>() != null)
                         ReplaceDrone(root, root.name.Split(' ')[0]);
                 }
             }
