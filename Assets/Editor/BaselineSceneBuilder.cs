@@ -48,6 +48,8 @@ public static class BaselineSceneBuilder
         Section("Control", new Vector3(10f, 0f, 10f), floor, new[] {
             new Vector3(-3f, 0f, 2f), new Vector3(3f, 0f, -2f) });
         BuildWalls();
+        // A short exit platform beyond the east-wall storage gate.
+        Cube("Exit landing", null, new Vector3(21.65f, -0.16f, -15f), new Vector3(4f, 0.32f, 4f), floor);
 
         GameObject graphObject = new GameObject("Waypoint graph — A* across four sections");
         WaypointGraph graph = graphObject.AddComponent<WaypointGraph>();
@@ -65,9 +67,8 @@ public static class BaselineSceneBuilder
             nodes[i] = node.transform;
         }
         graph.Configure(nodes, new[] {
-            new GraphEdge(0, 1, true),  // Closed door removes this shortcut.
-            new GraphEdge(0, 2, false), new GraphEdge(1, 3, false),
-            new GraphEdge(2, 3, false)
+            new GraphEdge(0, 2, 0), new GraphEdge(2, 3, 1),
+            new GraphEdge(3, 1, 2) // Ordered Checkpoint -> Server -> Control -> Storage.
         });
 
         GameObject navRoot = new GameObject("NavMesh surface — baked greybox");
@@ -84,7 +85,10 @@ public static class BaselineSceneBuilder
         }
 
         new GameObject("Game session").AddComponent<GameSession>();
-        BuildDoor();
+        BuildProgressionDoor("Checkpoint to Server gate", new Vector3(-10f, 0f, 0f), 0f, 0, "Checkpoint", "Scout");
+        BuildProgressionDoor("Server to Control gate", new Vector3(0f, 0f, 10f), 90f, 1, "Server", "Guard");
+        BuildProgressionDoor("Control to Storage gate", new Vector3(10f, 0f, 0f), 0f, 2, "Control", "Interceptor");
+        BuildProgressionDoor("Storage exit gate", new Vector3(20f, 0f, -15f), 90f, 3, "Storage", "Flanker");
         BuildExit();
         BuildPlayer();
         BuildDrone<ScoutBrain>("Scout", centers[0] + new Vector3(2f, 0f, 0f), centers[0], scout);
@@ -128,9 +132,12 @@ public static class BaselineSceneBuilder
         string path = "Assets/Materials/" + name + ".mat";
         Material existing = AssetDatabase.LoadAssetAtPath<Material>(path);
         if (existing != null) return existing;
-        Shader shader = Shader.Find("Standard");
-        if (shader == null) shader = Shader.Find("Universal Render Pipeline/Lit");
-        Material result = new Material(shader) { color = color, name = name };
+        // URP is the project's pipeline. Never select the legacy Standard shader first.
+        Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+        if (shader == null)
+            throw new InvalidOperationException("URP/Lit shader unavailable. Install Universal RP and run Tools > Shift Four > Configure URP Project.");
+        Material result = new Material(shader) { name = name };
+        result.SetColor("_BaseColor", color);
         AssetDatabase.CreateAsset(result, path);
         return result;
     }
@@ -172,10 +179,12 @@ public static class BaselineSceneBuilder
     {
         GameObject root = new GameObject("Fixed walls — main scene owner only");
         Cube("West", root.transform, new Vector3(-20f, 1.55f, 0f), new Vector3(0.5f, 3.1f, 40.5f), wall);
-        Cube("East", root.transform, new Vector3(20f, 1.55f, 0f), new Vector3(0.5f, 3.1f, 40.5f), wall);
+        Cube("East upper", root.transform, new Vector3(20f, 1.55f, 3.5f), new Vector3(0.5f, 3.1f, 33f), wall);
+        Cube("East lower", root.transform, new Vector3(20f, 1.55f, -18.5f), new Vector3(0.5f, 3.1f, 3f), wall);
         Cube("North", root.transform, new Vector3(0f, 1.55f, 20f), new Vector3(40.5f, 3.1f, 0.5f), wall);
         Cube("South", root.transform, new Vector3(0f, 1.55f, -20f), new Vector3(40.5f, 3.1f, 0.5f), wall);
         Cube("Vertical south", root.transform, new Vector3(0f, 1.55f, -16f), new Vector3(0.45f, 3.1f, 8f), wall);
+        Cube("Sealed checkpoint-storage wall", root.transform, new Vector3(0f, 1.55f, -10f), new Vector3(0.45f, 3.1f, 4.2f), wall);
         Cube("Vertical middle", root.transform, new Vector3(0f, 1.55f, 0f), new Vector3(0.45f, 3.1f, 16f), wall);
         Cube("Vertical north", root.transform, new Vector3(0f, 1.55f, 16f), new Vector3(0.45f, 3.1f, 8f), wall);
         Cube("Horizontal west", root.transform, new Vector3(-16f, 1.55f, 0f), new Vector3(8f, 3.1f, 0.45f), wall);
@@ -183,29 +192,29 @@ public static class BaselineSceneBuilder
         Cube("Horizontal east", root.transform, new Vector3(16f, 1.55f, 0f), new Vector3(8f, 3.1f, 0.45f), wall);
     }
 
-    private static void BuildDoor()
+    private static void BuildProgressionDoor(string name, Vector3 position, float yaw, int id, string room, string drone)
     {
-        GameObject root = new GameObject("Sliding shortcut door");
-        root.transform.position = new Vector3(0f, 0f, -10f);
-        Cube("Door placeholder — replace with Blender model", root.transform,
-            new Vector3(0f, 1.2f, 0f), new Vector3(0.4f, 2.4f, 3.6f), metal)
-            .GetComponent<BoxCollider>().enabled = false;
+        GameObject root = new GameObject(name);
+        root.transform.position = position;
+        root.transform.rotation = Quaternion.Euler(0f, yaw, 0f);
+        ShiftFourModelInstaller.AddDoorVisual(root.transform);
         BoxCollider collider = root.AddComponent<BoxCollider>();
-        collider.center = new Vector3(0f, 1.2f, 0f);
-        collider.size = new Vector3(0.4f, 2.4f, 3.6f);
-        root.AddComponent<Rigidbody>().isKinematic = true;
+        collider.center = new Vector3(0f, 1.35f, 0f);
+        collider.size = new Vector3(3.2f, 2.7f, 0.6f);
+        Rigidbody body = root.AddComponent<Rigidbody>();
+        body.isKinematic = true;
         NavMeshObstacle obstacle = root.AddComponent<NavMeshObstacle>();
         obstacle.shape = NavMeshObstacleShape.Box;
         obstacle.center = collider.center;
         obstacle.size = collider.size;
         obstacle.carving = true;
-        root.AddComponent<LabDoor>();
+        root.AddComponent<LabDoor>().Configure(id, room, drone);
     }
 
     private static void BuildExit()
     {
         GameObject root = new GameObject("Exit — needs all consoles and drones");
-        root.transform.position = new Vector3(16f, 0f, 16f);
+        root.transform.position = new Vector3(22f, 0f, -15f);
         Cube("Green exit marker", root.transform,
             new Vector3(0f, 0.025f, 0f), new Vector3(2.2f, 0.05f, 2.2f), exit)
             .GetComponent<BoxCollider>().enabled = false;
@@ -250,9 +259,7 @@ public static class BaselineSceneBuilder
         agent.height = 1.8f;
         agent.speed = 3.5f;
         agent.stoppingDistance = 1f;
-        GameObject visual = Cube("Drone placeholder — replace with Blender model", root.transform,
-            new Vector3(0f, 1.05f, 0f), new Vector3(1f, 0.45f, 0.85f), color);
-        UnityEngine.Object.DestroyImmediate(visual.GetComponent<BoxCollider>());
+        GameObject visual = ShiftFourModelInstaller.AddDroneVisual(root.transform, name);
         root.AddComponent<Health>().Configure(75f, false);
         root.AddComponent<DroneMotor>().Configure(visual.transform);
         root.AddComponent<T>();
