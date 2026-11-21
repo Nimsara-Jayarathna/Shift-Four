@@ -135,8 +135,43 @@ namespace ShiftFour
                 Box("Cable drop", cables, new Vector3(side * 2.4f, -.33f, 0), new Vector3(.12f, .66f, .16f), m.Metal);
             }
 
-            Transform terminal = Workstation("Server terminal", props, new Vector3(5.8f, 0, -2.8f), m.Server, m);
-            Label("DATA TERMINAL", terminal, new Vector3(0, .76f, -.57f), .11f, font, 2.8f, .25f, m.Lettering);
+            BuildServerPuzzle(props, m, font);
+        }
+
+        internal static void BuildServerPuzzle(Transform props, PrototypeMaterials m, Font font)
+        {
+            Transform display = Group("Network sequence display", props, new Vector3(-4.9f, 0, -5.85f));
+            display.localRotation = Quaternion.Euler(0, -26, 0);
+            Box("Display stand", display, Vector3.up * .57f, new Vector3(2.7f, 1.14f, .65f), m.Metal);
+            Box("Display housing", display, Vector3.up * 1.81f, new Vector3(3.8f, 1.42f, .35f), m.Metal);
+            Box("Display screen", display, new Vector3(0, 1.81f, -.185f),
+                new Vector3(3.6f, 1.24f, .04f), m.Glass, false);
+            Label("ACTIVATE IN ORDER", display, new Vector3(0, 2.19f, -.21f), .14f, font, 3.15f, .22f, m.Lettering);
+            Label(ServerNetworkPuzzle.SequenceText, display, new Vector3(0, 1.85f, -.21f), .24f, font, 3.15f, .38f, m.Lettering);
+            TextMesh boardStatus = Label(ServerNetworkPuzzle.CompletionTitle + "\n" + ServerNetworkPuzzle.CompletionDetail,
+                display, new Vector3(0, 1.43f, -.21f), .14f, font, 3.15f, .35f, m.Lettering);
+            var puzzle = display.gameObject.AddComponent<ServerNetworkPuzzle>();
+
+            var terminals = new ServerTerminal[3];
+            Material signal = m.CheckpointSignal != null ? m.CheckpointSignal : m.Marking;
+            for (int index = 0; index < terminals.Length; index++)
+            {
+                int number = index + 1;
+                string name = $"SERVER {number}";
+                Transform terminal = Group(name, props, new Vector3(3.7f + 2.8f * index, 0, -3.9f));
+                Box("Console base", terminal, Vector3.up * .55f, new Vector3(2.22f, 1.1f, 1.05f), m.Metal);
+                Box("Console housing", terminal, new Vector3(0, 1.51f, -.13f), new Vector3(2.36f, .86f, .54f), m.Metal);
+                Box("Console face", terminal, new Vector3(0, 1.51f, -.411f),
+                    new Vector3(2.16f, .68f, .035f), m.Glass, false);
+                Box("Server trim", terminal, new Vector3(0, .91f, -.534f), new Vector3(2.08f, .08f, .025f), m.Server, false);
+                var lamp = Box("Status lamp", terminal, new Vector3(.79f, 1.37f, -.46f),
+                    new Vector3(.21f, .21f, .075f), signal, false).GetComponent<Renderer>();
+                Label(name, terminal, new Vector3(0, 1.66f, -.436f), .17f, font, 1.9f, .26f, m.Lettering);
+                TextMesh status = Label("OFFLINE", terminal, new Vector3(-.24f, 1.37f, -.436f), .12f, font, 1.2f, .23f, m.Lettering);
+                terminals[index] = terminal.gameObject.AddComponent<ServerTerminal>();
+                terminals[index].Configure(puzzle, number, lamp, status);
+            }
+            puzzle.Configure(terminals, boardStatus);
         }
 
         private static void Control(Transform props, PrototypeMaterials m, Font font)
@@ -151,10 +186,70 @@ namespace ShiftFour
                 Box("Status band", monitor, new Vector3(0, -.42f, -.14f), new Vector3(2.8f, .07f, .022f), m.Control, false);
             }
 
-            Transform alarm = Group("Alarm panel", props, new Vector3(-7.9f, 1.55f, 12.35f));
-            Box("Alarm housing", alarm, Vector3.zero, new Vector3(1.9f, .95f, .28f), m.Metal);
-            Box("Alarm indicator", alarm, new Vector3(.61f, 0, -.16f), new Vector3(.28f, .28f, .08f), m.Storage, false);
-            Label("ALARM", alarm, new Vector3(-.25f, 0, -.155f), .11f, font, 1.05f, .38f, m.Lettering);
+            BuildControlLockdown(props, m, font);
+        }
+
+        internal static void BuildControlLockdown(Transform props, PrototypeMaterials m, Font font)
+        {
+            Transform panel = Group("LOCKDOWN OVERRIDE", props, new Vector3(0, 0, 10.45f));
+            Box("Override stand", panel, Vector3.up * .57f, new Vector3(3.4f, 1.14f, .68f), m.Metal);
+            Box("Override housing", panel, Vector3.up * 1.72f, new Vector3(4.9f, 1.46f, .46f), m.Metal);
+            Box("Override screen", panel, new Vector3(0, 1.72f, -.24f),
+                new Vector3(4.65f, 1.25f, .04f), m.Glass, false);
+            Material signal = m.CheckpointSignal != null ? m.CheckpointSignal : m.Marking;
+            var indicator = Box("Override indicator", panel, new Vector3(1.96f, 1.51f, -.29f),
+                new Vector3(.28f, .28f, .08f), signal, false).GetComponent<Renderer>();
+            Label("LOCKDOWN OVERRIDE", panel, new Vector3(0, 2.10f, -.268f), .21f, font, 4.15f, .34f, m.Lettering);
+            TextMesh status = Label(ControlLockdownMission.LockdownDisabled + "\n" + ControlLockdownMission.CompletionMessage,
+                panel, new Vector3(-.26f, 1.52f, -.268f), .16f, font, 3.65f, .56f, m.Lettering);
+            var mission = panel.gameObject.AddComponent<ControlLockdownMission>();
+
+            var switches = new[]
+            {
+                BuildSecuritySwitch(props, mission, 1, new Vector3(-5.3f, 0, -5.9f), -26, m, signal, font),
+                BuildSecuritySwitch(props, mission, 2, new Vector3(5.3f, 0, -5.9f), 26, m, signal, font),
+                BuildSecuritySwitch(props, mission, 3, new Vector3(7.15f, 0, 10.45f), 26, m, signal, font)
+            };
+
+            var warningIndicators = new Renderer[2];
+            var warningLights = new Light[warningIndicators.Length];
+            for (int i = 0; i < warningIndicators.Length; i++)
+            {
+                float x = i == 0 ? -3.9f : 3.9f;
+                Transform beacon = Group("Emergency warning beacon", props, new Vector3(x, 3.8f, 12.24f));
+                Box("Beacon housing", beacon, Vector3.zero, new Vector3(.76f, .48f, .39f), m.Metal, false);
+                warningIndicators[i] = Box("Beacon lens", beacon, Vector3.back * .22f,
+                    new Vector3(.58f, .33f, .1f), signal, false).GetComponent<Renderer>();
+                Light light = Group("Warning light", beacon, new Vector3(0, -.12f, -.65f)).gameObject.AddComponent<Light>();
+                light.type = LightType.Point;
+                light.range = 7.5f;
+                light.intensity = 9f;
+                light.shadows = LightShadows.None;
+                warningLights[i] = light;
+            }
+
+            mission.Configure(switches, indicator, status, warningIndicators, warningLights);
+        }
+
+        private static LockdownSecuritySwitch BuildSecuritySwitch(Transform props, ControlLockdownMission mission,
+            int number, Vector3 position, float yaw, PrototypeMaterials m, Material signal, Font font)
+        {
+            string name = $"SWITCH {number}";
+            Transform roomSwitch = Group(name, props, position);
+            roomSwitch.localRotation = Quaternion.Euler(0, yaw, 0);
+            Box("Switch stand", roomSwitch, Vector3.up * .57f, new Vector3(1.4f, 1.14f, .65f), m.Metal);
+            Box("Switch housing", roomSwitch, Vector3.up * 1.58f, new Vector3(1.93f, .94f, .38f), m.Metal);
+            Box("Switch screen", roomSwitch, new Vector3(0, 1.58f, -.203f),
+                new Vector3(1.76f, .77f, .032f), m.Glass, false);
+            Box("Switch trim", roomSwitch, new Vector3(0, 1.11f, -.20f),
+                new Vector3(1.6f, .055f, .04f), m.Control, false);
+            var lamp = Box("Switch indicator", roomSwitch, new Vector3(.59f, 1.47f, -.255f),
+                new Vector3(.22f, .22f, .075f), signal, false).GetComponent<Renderer>();
+            Label(name, roomSwitch, new Vector3(0, 1.76f, -.223f), .15f, font, 1.57f, .24f, m.Lettering);
+            TextMesh status = Label("DISABLED", roomSwitch, new Vector3(-.21f, 1.47f, -.223f), .11f, font, 1.08f, .18f, m.Lettering);
+            var component = roomSwitch.gameObject.AddComponent<LockdownSecuritySwitch>();
+            component.Configure(mission, number, lamp, status);
+            return component;
         }
 
         private static void Storage(Transform props, PrototypeMaterials m, Font font)
@@ -174,11 +269,73 @@ namespace ShiftFour
                 Box("Cargo crate", props, new Vector3(side * 7, .85f, -3.8f), new Vector3(1.7f, 1.7f, 1.7f), m.Crate);
             }
 
-            Transform generator = Group("Power generator", props, new Vector3(4.7f, 0, 8.6f));
-            Box("Generator housing", generator, Vector3.up * .9f, new Vector3(4, 1.8f, 2.2f), m.Metal);
-            Box("Service panel", generator, new Vector3(0, .95f, -1.12f), new Vector3(2.6f, .6f, .08f), m.Storage, false);
-            Label("POWER GENERATOR", generator, new Vector3(0, .95f, -1.17f), .13f, font, 2.35f, .42f, m.Lettering);
-            Cylinder("Vent stack", generator, new Vector3(1.25f, 2.2f, .5f), .34f, .82f, m.Metal);
+            BuildStoragePower(props, m, font);
+        }
+
+        internal static void BuildStoragePower(Transform props, PrototypeMaterials m, Font font)
+        {
+            Transform generator = Group("Emergency generator", props, new Vector3(4.7f, 0, 8.6f));
+            generator.localRotation = Quaternion.Euler(0, 22, 0);
+            Box("Generator housing", generator, Vector3.up * 1.09f, new Vector3(4.7f, 2.18f, 2.34f), m.Metal);
+            Box("Service panel", generator, new Vector3(0, 1.48f, -1.192f),
+                new Vector3(4.34f, 1.08f, .08f), m.Glass, false);
+            Label("EMERGENCY GENERATOR", generator, new Vector3(0, 1.83f, -1.24f),
+                .17f, font, 3.9f, .26f, m.Lettering);
+            TextMesh status = Label(StoragePowerMission.PowerRestored + "\n" + StoragePowerMission.CompletionMessage,
+                generator, new Vector3(-.21f, 1.33f, -1.24f), .145f, font, 3.52f, .44f, m.Lettering);
+            Material signal = m.CheckpointSignal != null ? m.CheckpointSignal : m.Marking;
+            var indicator = Box("Generator indicator", generator, new Vector3(1.85f, 1.34f, -1.26f),
+                new Vector3(.26f, .26f, .10f), signal, false).GetComponent<Renderer>();
+            Cylinder("Vent stack", generator, new Vector3(1.25f, 2.51f, .5f), .43f, .75f, m.Metal);
+
+            Box("Cell bay", generator, new Vector3(0, .61f, -1.2f), new Vector3(3.15f, .49f, .1f), m.Storage, false);
+            Label("POWER CELLS", generator, new Vector3(-.72f, .61f, -1.263f), .12f, font, 1.37f, .22f, m.Lettering);
+            var installedCells = new Renderer[2];
+            for (int i = 0; i < installedCells.Length; i++)
+            {
+                float x = .35f + .56f * i;
+                Box("Cell socket", generator, new Vector3(x, .61f, -1.27f), new Vector3(.42f, .30f, .09f), m.Glass, false);
+                installedCells[i] = Box("Installed power cell", generator, new Vector3(x, .61f, -1.33f),
+                    new Vector3(.29f, .2f, .055f), signal, false).GetComponent<Renderer>();
+            }
+
+            Light powerLight = Group("Restored power light", generator, new Vector3(0, 2.50f, -1.44f)).gameObject.AddComponent<Light>();
+            powerLight.type = LightType.Point;
+            powerLight.range = 5f;
+            powerLight.intensity = 6f;
+            powerLight.shadows = LightShadows.None;
+            var mission = generator.gameObject.AddComponent<StoragePowerMission>();
+
+            // The feet of the cells sit on the crate top and the middle shelf deck, outside the aisle.
+            var cells = new[]
+            {
+                BuildPowerCell(props, "Power Cell 1", new Vector3(-7, 1.7f, -4.15f), mission, m, signal),
+                BuildPowerCell(props, "Power Cell 2", new Vector3(6.18f, 1.60f, 2.84f), mission, m, signal)
+            };
+            mission.Configure(cells, indicator, installedCells, status, powerLight);
+        }
+
+        private static PowerCellPickup BuildPowerCell(Transform props, string name, Vector3 position,
+            StoragePowerMission mission, PrototypeMaterials m, Material signal)
+        {
+            Transform cell = Group(name, props, position);
+            Cylinder("Power cell core", cell, Vector3.up * .39f, .48f, .53f, signal, false);
+            Cylinder("Cell base", cell, Vector3.up * .075f, .58f, .15f, m.Metal, false);
+            Cylinder("Cell cap", cell, Vector3.up * .70f, .54f, .16f, m.Metal, false);
+            Cylinder("Top contact", cell, Vector3.up * .815f, .20f, .09f, m.Storage, false);
+            var collider = cell.gameObject.AddComponent<BoxCollider>();
+            collider.center = Vector3.up * .43f;
+            collider.size = new Vector3(.57f, .86f, .57f);
+
+            Light light = Group("Power cell glow", cell, new Vector3(0, .44f, -.32f)).gameObject.AddComponent<Light>();
+            light.type = LightType.Point;
+            light.color = new Color(.18f, .87f, 1f);
+            light.range = 2.25f;
+            light.intensity = 3.3f;
+            light.shadows = LightShadows.None;
+            var pickup = cell.gameObject.AddComponent<PowerCellPickup>();
+            pickup.Configure(mission);
+            return pickup;
         }
 
         private static Transform Workstation(string name, Transform props, Vector3 position, Material accent, PrototypeMaterials m)

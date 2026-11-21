@@ -9,9 +9,19 @@ namespace ShiftFour
         private PlayerController player;
         private Health health;
         private CheckpointSecurityScanner checkpoint;
-        private GUIStyle checkpointTitle, checkpointObjective, checkpointDetail;
+        private ServerNetworkPuzzle server;
+        private ControlLockdownMission control;
+        private StoragePowerMission storage;
+        private GUIStyle titleStyle, objectiveStyle, detailStyle;
 
-        internal void SetCheckpoint(CheckpointSecurityScanner scanner) => checkpoint = scanner;
+        internal void SetMissions(CheckpointSecurityScanner scanner, ServerNetworkPuzzle network,
+            ControlLockdownMission lockdown, StoragePowerMission power)
+        {
+            checkpoint = scanner;
+            server = network;
+            control = lockdown;
+            storage = power;
+        }
 
         private void Start()
         {
@@ -24,7 +34,27 @@ namespace ShiftFour
         {
             if (Event.current.type != EventType.Repaint || player == null) return;
 
-            if (checkpoint != null && checkpoint.isActiveAndEnabled) DrawCheckpointObjective();
+            float scale = Mathf.Clamp(Screen.height / 900f, .75f, 2f);
+            float top = 16 * scale;
+            var completeAccent = new Color(.43f, 1f, .59f);
+            if (checkpoint != null && checkpoint.isActiveAndEnabled)
+                top = DrawObjective(top, scale, "OPTIONAL CHECKPOINT TASK", checkpoint.Objective,
+                    checkpoint.Hint, checkpoint.Notice, checkpoint.IsComplete,
+                    checkpoint.IsComplete ? completeAccent : new Color(1f, .82f, .44f), true);
+            if (server != null && server.isActiveAndEnabled)
+                top = DrawObjective(top, scale, "OPTIONAL SERVER TASK",
+                    server.IsComplete ? ServerNetworkPuzzle.CompletionMessage : server.Objective,
+                    server.IsComplete ? string.Empty : "Read the sequence display inside Server",
+                    server.Notice, server.IsComplete, server.IsComplete ? completeAccent : new Color(.51f, .88f, 1f),
+                    server.HasWarning);
+            if (control != null && control.isActiveAndEnabled)
+                top = DrawObjective(top, scale, "OPTIONAL CONTROL ROOM TASK", control.Objective, control.Hint,
+                    control.Notice, control.IsComplete,
+                    control.IsComplete ? completeAccent : new Color(1f, .57f, .49f), true);
+            if (storage != null && storage.isActiveAndEnabled)
+                DrawObjective(top, scale, "OPTIONAL STORAGE TASK", storage.Objective, storage.Hint,
+                    storage.Notice, storage.IsComplete,
+                    storage.IsComplete ? completeAccent : new Color(.91f, .81f, 1f), true);
 
             if (Cursor.lockState == CursorLockMode.Locked)
             {
@@ -48,41 +78,42 @@ namespace ShiftFour
             GUI.Box(new Rect(Screen.width - 166, Screen.height - 44, 150, 28), ammo);
         }
 
-        private void DrawCheckpointObjective()
+        private float DrawObjective(float top, float scale, string title, string objective, string detail,
+            string notice, bool complete, Color accent, bool warning)
         {
-            float scale = Mathf.Clamp(Screen.height / 900f, .75f, 2f);
             float margin = 16 * scale;
             float width = Mathf.Min(490 * scale, Screen.width - margin * 2);
-            string notice = checkpoint.Notice;
             float height = (string.IsNullOrEmpty(notice) ? 96 : 123) * scale;
-            var accent = checkpoint.IsComplete ? new Color(.43f, 1f, .59f) : new Color(1f, .82f, .44f);
             Color previousColor = GUI.color;
             GUI.color = new Color(.045f, .075f, .09f, .96f);
-            GUI.DrawTexture(new Rect(margin, margin, width, height), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(margin, top, width, height), Texture2D.whiteTexture);
             GUI.color = accent;
-            GUI.DrawTexture(new Rect(margin, margin, 4 * scale, height), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(margin, top, 4 * scale, height), Texture2D.whiteTexture);
             GUI.color = Color.white;
 
-            checkpointTitle ??= new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold };
-            checkpointObjective ??= new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold };
-            checkpointDetail ??= new GUIStyle(GUI.skin.label);
-            checkpointTitle.fontSize = Mathf.RoundToInt(15 * scale);
-            checkpointObjective.fontSize = Mathf.RoundToInt(23 * scale);
-            checkpointDetail.fontSize = Mathf.RoundToInt(16 * scale);
-            checkpointTitle.normal.textColor = accent;
-            checkpointObjective.normal.textColor = checkpoint.IsComplete ? accent : Color.white;
-            checkpointDetail.normal.textColor = new Color(.83f, .9f, .93f);
+            titleStyle ??= new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold };
+            objectiveStyle ??= new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold };
+            detailStyle ??= new GUIStyle(GUI.skin.label);
+            titleStyle.fontSize = Mathf.RoundToInt(15 * scale);
+            objectiveStyle.fontSize = Mathf.RoundToInt(23 * scale);
+            detailStyle.fontSize = Mathf.RoundToInt(16 * scale);
+            titleStyle.normal.textColor = accent;
+            objectiveStyle.normal.textColor = complete ? accent : Color.white;
+            detailStyle.normal.textColor = new Color(.83f, .9f, .93f);
+            bool hasDetail = !string.IsNullOrEmpty(detail);
+            objectiveStyle.wordWrap = !hasDetail;
             float textX = margin + 16 * scale;
             float textWidth = width - 30 * scale;
-            GUI.Label(new Rect(textX, margin + 9 * scale, textWidth, 22 * scale), "OPTIONAL CHECKPOINT TASK", checkpointTitle);
-            GUI.Label(new Rect(textX, margin + 33 * scale, textWidth, 30 * scale), checkpoint.Objective, checkpointObjective);
-            GUI.Label(new Rect(textX, margin + 66 * scale, textWidth, 23 * scale), checkpoint.Hint, checkpointDetail);
+            GUI.Label(new Rect(textX, top + 9 * scale, textWidth, 22 * scale), title, titleStyle);
+            GUI.Label(new Rect(textX, top + 33 * scale, textWidth, (hasDetail ? 30 : 58) * scale), objective, objectiveStyle);
+            if (hasDetail) GUI.Label(new Rect(textX, top + 66 * scale, textWidth, 23 * scale), detail, detailStyle);
             if (!string.IsNullOrEmpty(notice))
             {
-                checkpointDetail.normal.textColor = new Color(1f, .43f, .38f);
-                GUI.Label(new Rect(textX, margin + 92 * scale, textWidth, 26 * scale), notice, checkpointDetail);
+                detailStyle.normal.textColor = warning ? new Color(1f, .43f, .38f) : accent;
+                GUI.Label(new Rect(textX, top + 92 * scale, textWidth, 26 * scale), notice, detailStyle);
             }
             GUI.color = previousColor;
+            return top + height + 10 * scale;
         }
     }
 }

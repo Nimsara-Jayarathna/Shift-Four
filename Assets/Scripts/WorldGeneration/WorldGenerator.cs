@@ -275,7 +275,13 @@ namespace ShiftFour
             body.GetComponent<PlayerController>()?.ApplyCameraPose();
             var checkpoint = layout != null ? layout.GetComponentInChildren<CheckpointSecurityScanner>() : null;
             if (layout == fixedLayout && checkpoint != null) checkpoint.ResetMission();
-            body.GetComponent<PrototypePlayerFeedback>()?.SetCheckpoint(checkpoint);
+            var server = layout != null ? layout.GetComponentInChildren<ServerNetworkPuzzle>() : null;
+            if (layout == fixedLayout && server != null) server.ResetPuzzle();
+            var control = layout != null ? layout.GetComponentInChildren<ControlLockdownMission>() : null;
+            if (layout == fixedLayout && control != null) control.ResetMission();
+            var storage = layout != null ? layout.GetComponentInChildren<StoragePowerMission>() : null;
+            if (layout == fixedLayout && storage != null) storage.ResetMission();
+            body.GetComponent<PrototypePlayerFeedback>()?.SetMissions(checkpoint, server, control, storage);
             Physics.SyncTransforms();
         }
 
