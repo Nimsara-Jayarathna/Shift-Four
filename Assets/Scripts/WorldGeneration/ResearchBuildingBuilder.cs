@@ -1,0 +1,105 @@
+using UnityEngine;
+using static ShiftFour.PrototypeGeometry;
+
+namespace ShiftFour
+{
+    public static class ResearchBuildingBuilder
+    {
+        private static readonly Vector3[] Sizes =
+        {
+            new Vector3(24, 10, 24), new Vector3(24, 16, 26),
+            new Vector3(26, 12, 26), new Vector3(30, 10, 24)
+        };
+
+        public static float FrontOffset(int index) => Sizes[index].z * .5f;
+
+        public static void Build(Transform parent, PrototypeMaterials materials, Font font, Vector3[] positions = null)
+        {
+            bool fixedLayout = positions == null;
+            positions ??= new[]
+            {
+                new Vector3(-42, 0, -18), new Vector3(-46, 0, 46),
+                new Vector3(46, 0, 46), new Vector3(42, 0, -18)
+            };
+            Building(parent, "Checkpoint", "01 / SECURITY INTAKE", positions[0], materials.Checkpoint, materials, font, 0, fixedLayout);
+            Building(parent, "Server", "02 / DATA & RESEARCH", positions[1], materials.Server, materials, font, 1, fixedLayout);
+            Building(parent, "Control", "03 / FACILITY OPERATIONS", positions[2], materials.Control, materials, font, 2, fixedLayout);
+            Building(parent, "Storage", "04 / LOGISTICS HANGAR", positions[3], materials.Storage, materials, font, 3, fixedLayout);
+        }
+
+        private static void Building(Transform parent, string name, string subtitle,
+            Vector3 position, Material accent, PrototypeMaterials m, Font font, int type, bool fixedLayout)
+        {
+            Vector3 size = Sizes[type];
+            Transform root = Group(name, parent, position);
+            float front = -size.z * .5f;
+            Box("Foundation", root, new Vector3(0, .15f, 0), new Vector3(size.x + 2, .3f, size.z + 2), m.Concrete);
+            Box("Solid placeholder shell", root, Vector3.up * (size.y * .5f), size, type == 1 ? m.Metal : m.Wall);
+            Box("Roof cap", root, Vector3.up * (size.y + .25f), new Vector3(size.x + 1, .5f, size.z + 1), m.Metal);
+            Box("Identity band", root, new Vector3(0, size.y - 1.5f, front - .12f), new Vector3(size.x + .1f, 2, .18f), m.Metal, false);
+            Box("Accent lintel", root, new Vector3(0, size.y - .35f, front - .2f), new Vector3(size.x, .16f, .22f), accent, false);
+            Label(name.ToUpperInvariant(), root, new Vector3(0, size.y - 1.45f, front - .24f), .48f, font, size.x - 3, 1.8f);
+            Box("Entrance sign", root, new Vector3(0, 4.5f, front - .18f), new Vector3(15, .9f, .18f), m.Metal, false);
+            Label(subtitle, root, new Vector3(0, 4.5f, front - .3f), .19f, font, 14, .6f);
+            Box("Sealed entrance", root, new Vector3(0, 1.9f, front - .15f), new Vector3(type == 3 ? 10 : 4, 3.8f, .2f), m.Glass, false);
+            for (int side = -1; side <= 1; side += 2)
+            {
+                Box("Entry jamb", root, new Vector3(side * (type == 3 ? 5.2f : 2.2f), 2, front - .25f), new Vector3(.22f, 4, .28f), accent, false);
+                Box("Corner pier", root, new Vector3(side * (size.x * .5f - .65f), size.y * .5f, front - .15f), new Vector3(1.3f, size.y, .4f), m.Concrete, false);
+            }
+            Box("Entry apron", root, new Vector3(0, .055f, front - 2.5f), new Vector3(12, .11f, 5), m.Concrete);
+            if (fixedLayout)
+                Box("Road connection", root, new Vector3(0, .035f, front - 5), new Vector3(4, .07f, 10), m.Concrete);
+
+            if (type == 0) Checkpoint(root, size, front, accent, m);
+            else if (type == 1) Server(root, size, front, accent, m);
+            else if (type == 2) Control(root, size, front, accent, m);
+            else Storage(root, size, front, accent, m);
+        }
+
+        private static void Checkpoint(Transform root, Vector3 size, float front, Material accent, PrototypeMaterials m)
+        {
+            Box("Security canopy", root, new Vector3(0, 5.5f, front - 3), new Vector3(16, .45f, 6), m.Metal);
+            for (int side = -1; side <= 1; side += 2)
+            {
+                Box("Canopy column", root, new Vector3(side * 7, 2.6f, front - 5), new Vector3(.35f, 5.2f, .35f), m.Concrete);
+                Box("Observation window", root, new Vector3(side * 7, 2.8f, front - .25f), new Vector3(5, 2, .14f), m.Glass, false);
+                Box("Security bollard", root, new Vector3(side * 3, .7f, front - 7), new Vector3(.4f, 1.4f, .4f), accent);
+            }
+            Box("Roof equipment", root, new Vector3(-6, size.y + 1, 3), new Vector3(5, 1.5f, 5), m.Concrete);
+        }
+
+        private static void Server(Transform root, Vector3 size, float front, Material accent, PrototypeMaterials m)
+        {
+            for (int i = -1; i <= 1; i++)
+            {
+                Box("Cooling tower", root, new Vector3(i * 6, size.y + 1.8f, 3), new Vector3(4, 3, 9), m.Concrete);
+                Cylinder("Cooling fan", root, new Vector3(i * 6, size.y + 3.4f, 3), 3.2f, .25f, m.Metal, false);
+                Box("Data facade fin", root, new Vector3(i * 6, 8.5f, front - .3f), new Vector3(.45f, 6.5f, .5f), accent, false);
+            }
+            for (int side = -1; side <= 1; side += 2)
+                Box("Server window bank", root, new Vector3(side * 6, 6.5f, front - .2f), new Vector3(7, 1.4f, .16f), m.Glass, false);
+        }
+
+        private static void Control(Transform root, Vector3 size, float front, Material accent, PrototypeMaterials m)
+        {
+            Box("Setback operations floor", root, new Vector3(0, size.y + 2, 2), new Vector3(17, 4, 15), m.Glass);
+            Box("Operations roof", root, new Vector3(0, size.y + 4.15f, 2), new Vector3(18, .3f, 16), m.Metal);
+            Cylinder("Communications mast", root, new Vector3(5, size.y + 7, 3), .3f, 6, m.Metal);
+            Sphere("Communications radome", root, new Vector3(5, size.y + 10, 3), Vector3.one * 2.7f, m.Concrete, false);
+            Box("Operations window", root, new Vector3(0, 6.8f, front - .22f), new Vector3(18, 1.3f, .18f), m.Glass, false);
+            Box("Mast beacon", root, new Vector3(5, size.y + 11.5f, 3), Vector3.one * .35f, accent, false);
+        }
+
+        private static void Storage(Transform root, Vector3 size, float front, Material accent, PrototypeMaterials m)
+        {
+            for (int i = -2; i <= 2; i++)
+            {
+                Box("Loading shutter rib", root, new Vector3(0, 1.9f + i * .6f, front - .28f), new Vector3(9.8f, .06f, .12f), m.Metal, false);
+                Box("Roof skylight", root, new Vector3(i * 5, size.y + .6f, 0), new Vector3(2, .4f, 17), m.Glass, false);
+            }
+            Box("Loading canopy", root, new Vector3(0, 5.6f, front - 2), new Vector3(19, .35f, 4), accent);
+        }
+
+    }
+}
