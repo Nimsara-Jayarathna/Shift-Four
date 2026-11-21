@@ -33,6 +33,10 @@ namespace ShiftFour
         private Health health;
         private DroneMotor motor;
         private PlayerController player;
+        private WaypointGraph outdoorGraph;
+        private Vector3[] outdoorPatrol;
+        private int outdoorPost = 1;
+        private float outdoorArrivalDistance;
         private float nextDecision;
         private float nextShot;
         public bool HasCommittedToAttack { get; private set; }
@@ -64,6 +68,8 @@ namespace ShiftFour
         protected Vector3 ObservedVelocity => observedVelocity;
         protected PlayerController Player => player;
         protected DroneMotor Motor => motor;
+        protected WaypointGraph NavigationGraph => outdoorGraph != null ? outdoorGraph :
+            (GameSession.Instance != null ? GameSession.Instance.Graph : null);
         protected bool Alive => health != null && health.IsAlive;
         protected virtual bool OwnsSoundInvestigation => false;
         protected virtual bool UsesImmediateSoundInvestigation => rapidSoundResponse;
@@ -78,12 +84,29 @@ namespace ShiftFour
             home = post;
         }
 
+        internal void ConfigureOutdoor(PlayerController target, WaypointGraph graph, Vector3[] patrol)
+        {
+            player = target;
+            outdoorGraph = graph;
+            outdoorPatrol = patrol;
+            outdoorArrivalDistance = GetComponent<UnityEngine.AI.NavMeshAgent>().stoppingDistance + .2f;
+            GetComponent<DroneMotor>().BindOutdoorNavigation(graph);
+        }
+
         protected virtual void Start()
         {
             health = GetComponent<Health>();
             motor = GetComponent<DroneMotor>();
-            player = GameSession.Instance != null ? GameSession.Instance.Player : null;
+            if (outdoorPatrol == null)
+                player = GameSession.Instance != null ? GameSession.Instance.Player : null;
             weaponMount = GetComponentInChildren<DroneRotorVisuals>()?.WeaponMount;
+            if (outdoorPatrol != null && (outdoorGraph == null || outdoorPatrol.Length < 2 ||
+                player == null || player.GetComponent<Health>() == null || weaponMount == null))
+            {
+                Debug.LogWarning($"Open World: {agentName} could not initialize. Check patrol, graph, player Health and weapon mount.", this);
+                enabled = false;
+                return;
+            }
             health.Died += OnDied;
             lastKnown = home;
             InitializeDifficulty();
@@ -100,7 +123,7 @@ namespace ShiftFour
             if (!health.IsAlive) Awareness.Disable();
             Hearing = GetComponent<DroneHearingSensor>();
             if (Hearing == null) Hearing = gameObject.AddComponent<DroneHearingSensor>();
-            Hearing.Configure(GameSession.Instance != null ? GameSession.Instance.Graph : null,
+            Hearing.Configure(NavigationGraph,
                 difficultyProfile != null ? DifficultySettings.hearingSensitivity : 1f);
             if (rapidSoundResponse) Hearing.EnableRapidResponse();
             Hearing.ObservationAccepted += OnHeard;
@@ -133,8 +156,9 @@ namespace ShiftFour
         private void Update()
         {
             if (!Alive || player == null) return;
-            if (GameSession.Instance != null && !GameSession.Instance.CanPlay) return;
-            if (!player.GetComponent<Health>().IsAlive || (GameSession.Instance != null && GameSession.Instance.Ended))
+            var session = outdoorPatrol == null ? GameSession.Instance : null;
+            if (session != null && !session.CanPlay) return;
+            if (!player.GetComponent<Health>().IsAlive || (session != null && session.Ended))
             {
                 WeaponAimPoint = null;
                 motor.Stop();
@@ -174,7 +198,7 @@ namespace ShiftFour
             // Navigation still respects closed gates, and every shot still needs clear cover checks.
             // Keep each archetype's close-range tactics; pursue instead of disengaging
             // when cover or distance would otherwise let the player end the encounter.
-            if (HasCommittedToAttack && (!visible || distance > attackRange))
+            if (outdoorPatrol == null && HasCommittedToAttack && (!visible || distance > attackRange))
             {
                 CurrentDecision = "Pursue engaged player";
                 motor.SetMovementMode(DroneMovementMode.Chase);
@@ -182,6 +206,14 @@ namespace ShiftFour
                 return;
             }
             motor.SetMovementMode(DroneMovementSpeeds.FromAwareness(Awareness.State));
+            if (outdoorPatrol != null && !visible && Awareness.State == DroneAwarenessState.Patrol)
+            {
+                if (Vector3.Distance(transform.position, outdoorPatrol[outdoorPost]) <= outdoorArrivalDistance)
+                    outdoorPost = (outdoorPost + 1) % outdoorPatrol.Length;
+                CurrentDecision = "Patrol outdoor post " + (outdoorPost + 1);
+                motor.GoTo(outdoorPatrol[outdoorPost]);
+                return;
+            }
             DecisionOption choice = Decide(visible, position, distance);
             if (UsesImmediateSoundInvestigation && !OwnsSoundInvestigation && !visible && hasSound &&
                 Awareness.State == DroneAwarenessState.Investigate && Reachable(sound.Position))
@@ -213,7 +245,7 @@ namespace ShiftFour
 
         protected bool Reachable(Vector3 target)
         {
-            WaypointGraph graph = GameSession.Instance != null ? GameSession.Instance.Graph : null;
+            WaypointGraph graph = NavigationGraph;
             return graph != null && graph.FindRoute(transform.position, target).Count > 0;
         }
 
@@ -230,7 +262,7 @@ namespace ShiftFour
         {
             using var profileSample=FireProfile.Auto();
             if (!Alive || player == null || !player.GetComponent<Health>().IsAlive ||
-                (GameSession.Instance != null && GameSession.Instance.Ended) || Time.time < nextShot) return;
+                (outdoorPatrol == null && GameSession.Instance != null && GameSession.Instance.Ended) || Time.time < nextShot) return;
             if (Vector3.Distance(CombatOrigin, player.EyePosition) > attackRange || !CanSeePlayer()) return;
             weaponMount?.AimAt(player.EyePosition);
             // A protruding barrel cannot bypass cover between its mounting point and tip.
@@ -243,7 +275,7 @@ namespace ShiftFour
             if (ClearShotAtFire(origin, vector, attackRange, out Vector3 hitPoint))
             {
                 HasCommittedToAttack = true;
-                Awareness?.CommitToCombat(Time.time);
+                if (outdoorPatrol == null) Awareness?.CommitToCombat(Time.time);
                 LastShotOrigin = origin;
                 LastShotHit = hitPoint;
                 WeaponAimPoint = player.EyePosition;
@@ -284,7 +316,7 @@ namespace ShiftFour
             if (Hearing != null) Hearing.enabled = false;
             motor.Stop();
             foreach (Collider body in GetComponentsInChildren<Collider>()) body.enabled = false;
-            GameSession.Instance?.DroneDestroyed(this);
+            if (outdoorPatrol == null) GameSession.Instance?.DroneDestroyed(this);
         }
 
         private void OnDestroy()

@@ -40,7 +40,7 @@ namespace ShiftFour
                 lateralWeight = lateralWeight, firingWeight = firingLineWeight, rangeWeight = rangeWeight,
                 costWeight = routeCostWeight, commitSeconds = minimumCommitSeconds, switchMargin = switchMargin,
                 cooldownSeconds = failedCandidateCooldown, stuckSeconds = noProgressSeconds });
-            var graph = GameSession.Instance != null ? GameSession.Instance.Graph : null;
+            var graph = NavigationGraph;
             if (graph != routeGraph || routes == null) { routeGraph = graph; routes = new FlankerRoutes(this, graph); }
             routes.Begin(Home);
             SoundObservation heard = default;

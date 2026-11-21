@@ -112,6 +112,8 @@ namespace ShiftFour
             CacheVisualPosition();
         }
 
+        internal void BindOutdoorNavigation(WaypointGraph waypoints) => graph = waypoints;
+
         private void Awake()
         {
             agent = GetComponent<NavMeshAgent>();

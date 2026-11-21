@@ -47,7 +47,7 @@ namespace ShiftFour
             SensorDecision = "Visual prediction and its bounded fallbacks";
             if (policy == null) policy = new InterceptorPolicy(prediction);
             if (tactical == null) tactical = new ControlTacticalNavigation(controlTactics);
-            var graph = GameSession.Instance != null ? GameSession.Instance.Graph : null;
+            var graph = NavigationGraph;
             if (graph != null && (validator == null || tacticalGraph != graph))
             {
                 tacticalGraph = graph;

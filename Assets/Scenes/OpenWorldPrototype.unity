@@ -48018,6 +48018,9 @@ MonoBehaviour:
   buildingSpacing: 18
   objectDensity: 1
   scoutPrefab: {fileID: 7204422458792724814, guid: 77f34060a78d9ac46a66ce98d7854514, type: 3}
+  guardPrefab: {fileID: 8484465958469217813, guid: 330422133157e704a9df93e5d90c9e26, type: 3}
+  interceptorPrefab: {fileID: 3657792338629204620, guid: abb9ee35651e8c34eaec053ac2ade619, type: 3}
+  flankerPrefab: {fileID: 6688229851011734087, guid: d579c59bead26ed4eb162c1847442f03, type: 3}
   scoutDetectionRange: 24
   fixedLayout: {fileID: 321789651}
   spawn: {fileID: 1496081870}

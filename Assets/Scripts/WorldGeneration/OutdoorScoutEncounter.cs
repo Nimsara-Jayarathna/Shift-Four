@@ -5,7 +5,7 @@ using UnityEngine.AI;
 
 namespace ShiftFour
 {
-    // Owns one runtime bake, scoped to the Checkpoint patrol and pursuit area.
+    // Owns the shared outdoor navigation registration for the lifetime of this generated world.
     [DisallowMultipleComponent]
     public sealed class OutdoorScoutEncounter : MonoBehaviour
     {
@@ -13,41 +13,61 @@ namespace ShiftFour
         private NavMeshDataInstance registration;
 
         internal static Transform Spawn(Transform world, GameObject prefab, PlayerController player,
-            float detectionRange, PrototypeMaterials materials, Font font, int seed)
+            float detectionRange, PrototypeMaterials materials, Font font, int seed,
+            out bool navigationReady, params GameObject[] otherDrones)
         {
             Transform checkpoint = world.Find("Buildings/Checkpoint");
             var encounter = PrototypeGeometry.Group("Checkpoint Security", world).gameObject.AddComponent<OutdoorScoutEncounter>();
+            navigationReady = false;
+            float range = float.IsNaN(detectionRange) ? 24f : Mathf.Clamp(detectionRange, 6f, 40f);
+            float leash = Mathf.Max(30f, range + 5f);
             try
             {
-                if (prefab == null) throw new InvalidOperationException("World Generator has no Scout Prefab assigned.");
                 if (checkpoint == null) throw new InvalidOperationException("Generated Checkpoint building is missing.");
                 if (player == null || player.ViewCamera == null || player.GetComponent<Health>() == null)
                     throw new InvalidOperationException("Spawn has no configured FPS player, camera or Health.");
-                return encounter.Build(world, checkpoint, prefab, player, detectionRange, materials, font, seed);
+                encounter.BakeNavigation(world, checkpoint, prefab, otherDrones, leash);
+                navigationReady = true;
+            }
+            catch (Exception error)
+            {
+                Debug.LogWarning($"Open World drone navigation failed for seed {seed}: {error.Message}", encounter);
+                encounter.gameObject.SetActive(false);
+                Destroy(encounter.gameObject);
+                return null;
+            }
+
+            try
+            {
+                return encounter.BuildScout(checkpoint, prefab, player, range, leash, materials, font, seed);
             }
             catch (Exception error)
             {
                 Debug.LogWarning($"Outdoor Scout spawn failed for seed {seed}: {error.Message}", encounter);
+                foreach (Transform child in encounter.transform)
+                {
+                    child.gameObject.SetActive(false);
+                    Destroy(child.gameObject);
+                }
             }
-            encounter.gameObject.SetActive(false);
-            Destroy(encounter.gameObject);
             return null;
         }
 
-        private Transform Build(Transform world, Transform checkpoint, GameObject prefab, PlayerController player,
-            float range, PrototypeMaterials materials, Font font, int seed)
+        private void BakeNavigation(Transform world, Transform checkpoint, GameObject scout, GameObject[] others, float leash)
         {
-            var templateAgent = prefab.GetComponent<NavMeshAgent>();
-            var templateBody = prefab.GetComponent<DroneBody>();
-            if (templateAgent == null || templateBody == null || prefab.GetComponent<ScoutBrain>() == null
-                || prefab.GetComponentInChildren<DroneRotorVisuals>() == null)
-                throw new InvalidOperationException("Scout Prefab needs its NavMeshAgent, DroneBody, ScoutBrain and rotor visuals.");
-            range = float.IsNaN(range) ? 24f : Mathf.Clamp(range, 6f, 40f);
-            float leash = Mathf.Max(30f, range + 5f);
-
-            var settings = NavMesh.GetSettingsByID(templateAgent.agentTypeID);
-            settings.agentRadius = templateBody.HorizontalRadius * Mathf.Sqrt(2f) + .04f;
-            settings.agentHeight = Mathf.Max(templateAgent.height, templateBody.EnvelopeCenter.y + templateBody.EnvelopeExtents.y);
+            var navigationPrefab = HasNavigation(scout) ? scout : Array.Find(others, HasNavigation);
+            if (navigationPrefab == null) throw new InvalidOperationException("No assigned drone prefab has a NavMeshAgent and DroneBody.");
+            var settings = NavMesh.GetSettingsByID(navigationPrefab.GetComponent<NavMeshAgent>().agentTypeID);
+            settings.agentRadius = 0f;
+            settings.agentHeight = 0f;
+            IncludeFootprint(ref settings, navigationPrefab);
+            bool coverWholeWorld = false;
+            foreach (var other in others)
+            {
+                if (!HasNavigation(other) || other.GetComponent<NavMeshAgent>().agentTypeID != settings.agentTypeID) continue;
+                IncludeFootprint(ref settings, other);
+                coverWholeWorld = true;
+            }
             settings.agentClimb = .25f;
             var sources = new List<NavMeshBuildSource>();
             NavMeshBuilder.CollectSources(world, WeaponController.GameplayRaycastMask, NavMeshCollectGeometry.PhysicsColliders,
@@ -61,18 +81,43 @@ namespace ShiftFour
                 foreach (Collider solid in world.Find("Environment/" + group).GetComponentsInChildren<Collider>())
                     if (solid.enabled && !solid.isTrigger) Exclude(sources, solid.bounds, 4f);
 
-            var bounds = new Bounds(checkpoint.position + Vector3.up,
-                new Vector3((leash + 3f) * 2f, 4f, (leash + 3f) * 2f));
+            Bounds ground = world.Find("Ground").GetComponent<Collider>().bounds;
+            var bounds = coverWholeWorld
+                ? new Bounds(world.position + Vector3.up, new Vector3(ground.size.x, 4f, ground.size.z))
+                : new Bounds(ScoutPatrolCenter(checkpoint) + Vector3.up, new Vector3((leash + 3f) * 2f, 4f, (leash + 3f) * 2f));
             navigation = NavMeshBuilder.BuildNavMeshData(settings, sources, bounds, Vector3.zero, Quaternion.identity);
             if (navigation == null) throw new InvalidOperationException("Runtime NavMesh bake returned no data.");
             registration = NavMesh.AddNavMeshData(navigation);
             if (!registration.valid) throw new InvalidOperationException("Runtime NavMesh could not be registered.");
+        }
 
+        private static bool HasNavigation(GameObject prefab)
+            => prefab != null && prefab.GetComponent<NavMeshAgent>() != null && prefab.GetComponent<DroneBody>() != null;
+
+        private static void IncludeFootprint(ref NavMeshBuildSettings settings, GameObject prefab)
+        {
+            var body = prefab.GetComponent<DroneBody>();
+            settings.agentRadius = Mathf.Max(settings.agentRadius, body.HorizontalRadius * Mathf.Sqrt(2f) + .04f);
+            settings.agentHeight = Mathf.Max(settings.agentHeight, prefab.GetComponent<NavMeshAgent>().height,
+                body.EnvelopeCenter.y + body.EnvelopeExtents.y);
+        }
+
+        private static Vector3 ScoutPatrolCenter(Transform checkpoint)
+            => checkpoint.TransformPoint(new Vector3(7.7f, 0, -ResearchBuildingBuilder.FrontOffset(0) - 4.3f));
+
+        private Transform BuildScout(Transform checkpoint, GameObject prefab, PlayerController player,
+            float range, float leash, PrototypeMaterials materials, Font font, int seed)
+        {
+            if (!HasNavigation(prefab) || prefab.GetComponent<ScoutBrain>() == null ||
+                prefab.GetComponentInChildren<DroneRotorVisuals>() == null)
+                throw new InvalidOperationException("Assign the Scout prefab with its NavMeshAgent, DroneBody, ScoutBrain and rotor visuals.");
+            var templateAgent = prefab.GetComponent<NavMeshAgent>();
+            var templateBody = prefab.GetComponent<DroneBody>();
+            float front = -ResearchBuildingBuilder.FrontOffset(0);
             var filter = new NavMeshQueryFilter { agentTypeID = templateAgent.agentTypeID, areaMask = templateAgent.areaMask };
             var patrol = new Vector3[4];
             // The avenue approaches this west-side building from the east. Keep the loop in
             // the forecourt on that same side, leaving the doorway center and road clear.
-            float front = -ResearchBuildingBuilder.FrontOffset(0);
             Vector3[] corners =
             {
                 new Vector3(10.5f, 0, front - 5.8f), new Vector3(10.5f, 0, front - 2.8f),
@@ -105,7 +150,7 @@ namespace ShiftFour
             var original = scout.GetComponent<ScoutBrain>();
             original.enabled = false;
             Transform marker = CreateMarker(scout.transform, materials, font, player.ViewCamera);
-            scout.AddComponent<OutdoorScout>().Configure(original, player, patrol, checkpoint.position, range, leash, marker);
+            scout.AddComponent<OutdoorScout>().Configure(original, player, patrol, ScoutPatrolCenter(checkpoint), range, leash, marker);
             staging.gameObject.SetActive(true);
             if (!scout.GetComponent<NavMeshAgent>().isOnNavMesh)
                 throw new InvalidOperationException($"Scout agent could not bind to the NavMesh at {patrol[0]}.");
@@ -128,14 +173,15 @@ namespace ShiftFour
             return marker;
         }
 
-        private static Transform CreateMarker(Transform scout, PrototypeMaterials materials, Font font, Camera camera)
+        internal static Transform CreateMarker(Transform scout, PrototypeMaterials materials, Font font, Camera camera,
+            string label = "SCOUT DRONE", Material accent = null)
         {
-            var marker = PrototypeGeometry.Group("SCOUT DRONE marker", scout, Vector3.up * 2.75f);
+            var marker = PrototypeGeometry.Group(label + " marker", scout, Vector3.up * 2.75f);
             marker.rotation = Quaternion.LookRotation(marker.position - camera.transform.position);
             PrototypeGeometry.Box("Marker backplate", marker, Vector3.zero, new Vector3(3.95f, .7f, .08f), materials.Metal, false);
             PrototypeGeometry.Box("Marker stripe", marker, new Vector3(-1.88f, 0, -.053f),
-                new Vector3(.1f, .57f, .025f), materials.Checkpoint, false);
-            PrototypeGeometry.Label("SCOUT DRONE", marker, new Vector3(.04f, 0, -.053f), .16f, font, 3.55f, .46f, materials.Lettering);
+                new Vector3(.1f, .57f, .025f), accent != null ? accent : materials.Checkpoint, false);
+            PrototypeGeometry.Label(label, marker, new Vector3(.04f, 0, -.053f), .16f, font, 3.55f, .46f, materials.Lettering);
             return marker;
         }
 

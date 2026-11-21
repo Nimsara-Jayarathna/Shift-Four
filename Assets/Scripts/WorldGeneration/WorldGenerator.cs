@@ -10,6 +10,7 @@ namespace ShiftFour
     [DefaultExecutionOrder(-100)]
     public sealed class WorldGenerator : MonoBehaviour
     {
+        private const string GeneratedWorldName = "GeneratedWorld";
         private const float MinimumSize = 120f;
         private const float MaximumSize = 500f;
         private const float DefaultBuildingSpacing = 18f;
@@ -30,6 +31,9 @@ namespace ShiftFour
         private float buildingSpacing = DefaultBuildingSpacing;
         [SerializeField, Range(0, 4)] private float objectDensity = 1;
         [SerializeField] private GameObject scoutPrefab;
+        [SerializeField] private GameObject guardPrefab;
+        [SerializeField] private GameObject interceptorPrefab;
+        [SerializeField] private GameObject flankerPrefab;
         [SerializeField, Range(6f, 40f)] private float scoutDetectionRange = 24f;
         [SerializeField] private Transform fixedLayout;
         [SerializeField] private Transform spawn;
@@ -44,10 +48,18 @@ namespace ShiftFour
             scoutPrefab = scout;
         }
 
+        public void ConfigureDronePrefabs(GameObject guard, GameObject interceptor, GameObject flanker)
+        {
+            guardPrefab = guard;
+            interceptorPrefab = interceptor;
+            flankerPrefab = flanker;
+        }
+
         private void Awake()
         {
             int startupSeed = randomSeedOnStart ? BitConverter.ToInt32(Guid.NewGuid().ToByteArray(), 0) : seed;
-            GenerateLayout(startupSeed, faceScoutAtSpawn: true);
+            if (!GenerateLayout(startupSeed, faceScoutAtSpawn: true))
+                BindMissions(FindGeneratedContent() ?? fixedLayout);
         }
 
         [ContextMenu("Generate World")]
@@ -56,21 +68,22 @@ namespace ShiftFour
         [ContextMenu("Clear Generated World")]
         public void Clear()
         {
-            if (!HasGeneratedContent()) return;
-            Discard(generatedContent);
+            Transform previous = FindGeneratedContent();
+            if (previous == null) return;
+            Discard(previous);
             generatedContent = null;
             if (fixedLayout != null) fixedLayout.gameObject.SetActive(true);
             ResetPlayer(fixedLayout);
             MarkSceneDirty();
         }
 
-        private void GenerateLayout(int layoutSeed, bool faceScoutAtSpawn = false)
+        private bool GenerateLayout(int layoutSeed, bool faceScoutAtSpawn = false)
         {
             Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             if (fixedLayout == null || spawn == null || font == null || !HasMaterials())
             {
                 Debug.LogWarning("Open World: assign the fixed layout, spawn and prototype materials before generating. Keeping the current layout.", this);
-                return;
+                return false;
             }
 
             float size = float.IsNaN(worldSize) ? OpenWorldPrototypeLayout.WorldSize : Mathf.Clamp(worldSize, MinimumSize, MaximumSize);
@@ -92,7 +105,8 @@ namespace ShiftFour
             // Anchor the layout to the existing spawn, including when previewing a different size.
             Vector3 entry = new Vector3(0, .12f, -usable + 9f);
             Vector3 origin = transform.InverseTransformPoint(spawn.position) - entry;
-            Transform next = Group("GeneratedWorld", transform, origin);
+            Transform previous = FindGeneratedContent();
+            Transform next = Group(GeneratedWorldName, transform, origin);
             next.gameObject.SetActive(false);
             try
             {
@@ -108,11 +122,11 @@ namespace ShiftFour
             catch (Exception exception)
             {
                 Discard(next);
-                Debug.LogWarning($"Open World: generation failed for seed {layoutSeed}. Keeping the current layout. {exception.Message}", this);
-                return;
+                Debug.LogWarning($"Open World: generation failed for seed {layoutSeed}. Keeping the current layout. {exception}", this);
+                return false;
             }
 
-            if (HasGeneratedContent()) Discard(generatedContent);
+            if (previous != null) Discard(previous);
             fixedLayout.gameObject.SetActive(false);
             generatedContent = next;
             next.gameObject.SetActive(true);
@@ -123,7 +137,17 @@ namespace ShiftFour
             {
                 var player = spawn.GetComponentInChildren<PlayerController>();
                 Transform marker = OutdoorScoutEncounter.Spawn(next, scoutPrefab, player,
-                    scoutDetectionRange, materials, font, layoutSeed);
+                    scoutDetectionRange, materials, font, layoutSeed, out bool navigationReady,
+                    guardPrefab, interceptorPrefab, flankerPrefab);
+                if (navigationReady)
+                {
+                    OutdoorDroneEncounter.Spawn<GuardBrain>(next, guardPrefab, player, "Server", 1,
+                        "Guard", materials.Server, materials, font, layoutSeed);
+                    OutdoorDroneEncounter.Spawn<InterceptorBrain>(next, interceptorPrefab, player, "Control", 2,
+                        "Interceptor", materials.Control, materials, font, layoutSeed);
+                    OutdoorDroneEncounter.Spawn<FlankerBrain>(next, flankerPrefab, player, "Storage", 3,
+                        "Flanker", materials.Storage, materials, font, layoutSeed);
+                }
                 if (faceScoutAtSpawn && marker != null &&
                     !Physics.Linecast(player.EyePosition, marker.position, WeaponController.GameplayRaycastMask,
                         QueryTriggerInteraction.Ignore))
@@ -132,6 +156,7 @@ namespace ShiftFour
                     if (heading.sqrMagnitude > .01f) player.transform.rotation = Quaternion.LookRotation(heading);
                 }
             }
+            return true;
         }
 
         private static Vector3[] PlaceBuildings(Random random, float usable, float spacing)
@@ -261,28 +286,102 @@ namespace ShiftFour
             && materials.Wood && materials.Foliage && materials.Rock && materials.Crate
             && materials.Checkpoint && materials.Server && materials.Control && materials.Storage;
 
-        private bool HasGeneratedContent() => generatedContent != null && generatedContent.parent == transform;
+        private Transform FindGeneratedContent()
+        {
+            if (generatedContent != null && generatedContent.parent == transform && generatedContent.name == GeneratedWorldName)
+                return generatedContent;
+
+            // A stale serialized reference must not leave the prior generated layout active.
+            Transform existing = transform.Find(GeneratedWorldName);
+            if (existing == null || existing.Find("Buildings") == null || existing.Find("Ground") == null) return null;
+            Debug.LogWarning("Open World missions: recovered the generated layout from a missing or stale reference.", existing);
+            return existing;
+        }
 
         private void ResetPlayer(Transform layout)
         {
-            if (!Application.isPlaying || spawn == null) return;
-            var body = spawn.GetComponentInChildren<CharacterController>();
-            if (body == null) return;
-            bool enabled = body.enabled;
-            if (enabled) body.enabled = false;
-            body.transform.position = spawn.position;
-            if (enabled) body.enabled = true;
-            body.GetComponent<PlayerController>()?.ApplyCameraPose();
-            var checkpoint = layout != null ? layout.GetComponentInChildren<CheckpointSecurityScanner>() : null;
-            if (layout == fixedLayout && checkpoint != null) checkpoint.ResetMission();
-            var server = layout != null ? layout.GetComponentInChildren<ServerNetworkPuzzle>() : null;
-            if (layout == fixedLayout && server != null) server.ResetPuzzle();
-            var control = layout != null ? layout.GetComponentInChildren<ControlLockdownMission>() : null;
-            if (layout == fixedLayout && control != null) control.ResetMission();
-            var storage = layout != null ? layout.GetComponentInChildren<StoragePowerMission>() : null;
-            if (layout == fixedLayout && storage != null) storage.ResetMission();
-            body.GetComponent<PrototypePlayerFeedback>()?.SetMissions(checkpoint, server, control, storage);
+            if (!Application.isPlaying) return;
+            var body = spawn != null ? spawn.GetComponentInChildren<CharacterController>() : null;
+            if (body != null)
+            {
+                bool enabled = body.enabled;
+                if (enabled) body.enabled = false;
+                body.transform.position = spawn.position;
+                if (enabled) body.enabled = true;
+                body.GetComponent<PlayerController>()?.ApplyCameraPose();
+            }
+            BindMissions(layout);
             Physics.SyncTransforms();
+        }
+
+        private void BindMissions(Transform layout)
+        {
+            if (layout == null)
+            {
+                Debug.LogWarning("Open World missions: no active layout to initialize.", this);
+                return;
+            }
+
+            Transform buildings = layout.Find("Buildings");
+            var checkpoint = layout.GetComponentInChildren<CheckpointSecurityScanner>();
+            if (layout == fixedLayout && checkpoint != null) checkpoint.ResetMission();
+            var server = layout.GetComponentInChildren<ServerNetworkPuzzle>();
+            if (layout == fixedLayout && server != null) server.ResetPuzzle();
+            var control = layout.GetComponentInChildren<ControlLockdownMission>();
+            if (layout == fixedLayout && control != null) control.ResetMission();
+            var storage = layout.GetComponentInChildren<StoragePowerMission>();
+            if (layout == fixedLayout && storage != null) storage.ResetMission();
+
+            var feedback = spawn != null ? spawn.GetComponentInChildren<PrototypePlayerFeedback>() : null;
+            // The generator's Awake can run before the enabled HUD receives OnEnable.
+            bool hasHud = feedback != null && feedback.enabled;
+            if (hasHud)
+                feedback.SetMissions(buildings, checkpoint, server, control, storage);
+            else
+                Debug.LogWarning("Open World missions: no active objective HUD under Spawn.", this);
+
+            bool ready = CheckTargets<CheckpointSecurityScanner>(layout, "Checkpoint", 1) &
+                         CheckTargets<SecurityAccessCard>(layout, "Checkpoint", 1) &
+                         CheckTargets<ServerNetworkPuzzle>(layout, "Server", 1) &
+                         CheckTargets<ServerTerminal>(layout, "Server", 3, terminal => terminal.IsOnline) &
+                         CheckTargets<ControlLockdownMission>(layout, "Control", 1) &
+                         CheckTargets<LockdownSecuritySwitch>(layout, "Control", 3, securitySwitch => securitySwitch.IsActivated) &
+                         CheckTargets<StoragePowerMission>(layout, "Storage", 1) &
+                         CheckTargets<PowerCellPickup>(layout, "Storage", 2);
+            if ((checkpoint != null && checkpoint.IsComplete) || (server != null && server.IsComplete) ||
+                (control != null && control.IsComplete) || (storage != null && storage.IsComplete))
+            {
+                Debug.LogWarning($"Open World missions: a mission was already complete while initializing {layout.name}.", layout);
+                ready = false;
+            }
+            if (ready && hasHud)
+                Debug.Log($"Open World missions ready in {layout.name}. Checkpoint: {checkpoint.Objective}. " +
+                    $"Server: {server.Objective}. Control: {control.Objective}. Storage: {storage.Objective}.", layout);
+        }
+
+        private static bool CheckTargets<T>(Transform layout, string building, int expected, Func<T, bool> hasProgress = null)
+            where T : MonoBehaviour, IInteractable
+        {
+            T[] targets = layout.GetComponentsInChildren<T>(true);
+            Transform room = layout.Find($"Buildings/{building}");
+            bool valid = targets.Length == expected && room != null;
+            if (!valid)
+                Debug.LogWarning($"Open World missions: {layout.name}/{building} expected {expected} {typeof(T).Name}, found {targets.Length}.", layout);
+            foreach (T target in targets)
+            {
+                bool hasCollider = Array.Exists(target.GetComponentsInChildren<Collider>(), collider =>
+                    collider.enabled && !collider.isTrigger &&
+                    (WeaponController.GameplayRaycastMask & (1 << collider.gameObject.layer)) != 0);
+                string issue = null;
+                if (!target.enabled || !target.gameObject.activeInHierarchy) issue = "is disabled";
+                else if (room == null || !target.transform.IsChildOf(room)) issue = "is outside its building";
+                else if (!hasCollider) issue = "has no collider for the interaction ray";
+                else if (hasProgress != null && hasProgress(target)) issue = "has progress before the player interacts";
+                if (issue == null) continue;
+                Debug.LogWarning($"Open World missions: {layout.name}/{building}/{target.name} {issue}.", target);
+                valid = false;
+            }
+            return valid;
         }
 
         private void Discard(Transform content)

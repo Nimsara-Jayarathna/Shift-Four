@@ -221,7 +221,7 @@ namespace ShiftFour
                 !NavMesh.CalculatePath(transform.position, point, agent.areaMask, validationPath) ||
                 validationPath.status != NavMeshPathStatus.PathComplete) return false;
             foreach (Vector3 corner in validationPath.corners) if (!InProtectedArea(corner)) return false;
-            WaypointGraph graph = GameSession.Instance != null ? GameSession.Instance.Graph : null;
+            WaypointGraph graph = NavigationGraph;
             if (graph == null) return false;
             var route = graph.FindRoute(transform.position, point);
             if (route.Count == 0) return false;

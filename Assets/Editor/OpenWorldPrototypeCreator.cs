@@ -123,7 +123,12 @@ public static class OpenWorldPrototypeCreator
         foreach (string name in new[] { "Ground", "Roads", "Buildings", "Environment" })
             world.Find(name).SetParent(fixedLayout, false);
         var scout = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Agents/Scout.prefab");
-        world.gameObject.AddComponent<WorldGenerator>().Configure(fixedLayout, world.Find("Spawn"), materials, scout);
+        var generator = world.gameObject.AddComponent<WorldGenerator>();
+        generator.Configure(fixedLayout, world.Find("Spawn"), materials, scout);
+        generator.ConfigureDronePrefabs(
+            AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Agents/Guard.prefab"),
+            AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Agents/Interceptor.prefab"),
+            AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Agents/Flanker.prefab"));
     }
 
     internal static PrototypeMaterials CreateMaterials(Shader lit)
