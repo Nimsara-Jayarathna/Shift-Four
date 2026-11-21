@@ -21,5 +21,8 @@ namespace ShiftFour
         public Material Server;
         public Material Control;
         public Material Storage;
+        public GameObject ServerRack;
+        public Material Lettering;
+        public Material CheckpointSignal;
     }
 }

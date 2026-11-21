@@ -5,6 +5,10 @@ namespace ShiftFour
 {
     public static class ResearchBuildingBuilder
     {
+        public const float FloorHeight = .2f;
+        private const float WallThickness = .45f;
+        private const float EntranceHeight = 3.8f;
+
         private static readonly Vector3[] Sizes =
         {
             new Vector3(24, 10, 24), new Vector3(24, 16, 26),
@@ -33,15 +37,13 @@ namespace ShiftFour
             Vector3 size = Sizes[type];
             Transform root = Group(name, parent, position);
             float front = -size.z * .5f;
-            Box("Foundation", root, new Vector3(0, .15f, 0), new Vector3(size.x + 2, .3f, size.z + 2), m.Concrete);
-            Box("Solid placeholder shell", root, Vector3.up * (size.y * .5f), size, type == 1 ? m.Metal : m.Wall);
+            Box("Foundation", root, Vector3.up * (FloorHeight * .5f), new Vector3(size.x + 2, FloorHeight, size.z + 2), m.Concrete);
             Box("Roof cap", root, Vector3.up * (size.y + .25f), new Vector3(size.x + 1, .5f, size.z + 1), m.Metal);
             Box("Identity band", root, new Vector3(0, size.y - 1.5f, front - .12f), new Vector3(size.x + .1f, 2, .18f), m.Metal, false);
             Box("Accent lintel", root, new Vector3(0, size.y - .35f, front - .2f), new Vector3(size.x, .16f, .22f), accent, false);
-            Label(name.ToUpperInvariant(), root, new Vector3(0, size.y - 1.45f, front - .24f), .48f, font, size.x - 3, 1.8f);
+            Label(name.ToUpperInvariant(), root, new Vector3(0, size.y - 1.45f, front - .24f), .48f, font, size.x - 3, 1.8f, m.Lettering);
             Box("Entrance sign", root, new Vector3(0, 4.5f, front - .18f), new Vector3(15, .9f, .18f), m.Metal, false);
-            Label(subtitle, root, new Vector3(0, 4.5f, front - .3f), .19f, font, 14, .6f);
-            Box("Sealed entrance", root, new Vector3(0, 1.9f, front - .15f), new Vector3(type == 3 ? 10 : 4, 3.8f, .2f), m.Glass, false);
+            Label(subtitle, root, new Vector3(0, 4.5f, front - .3f), .19f, font, 14, .6f, m.Lettering);
             for (int side = -1; side <= 1; side += 2)
             {
                 Box("Entry jamb", root, new Vector3(side * (type == 3 ? 5.2f : 2.2f), 2, front - .25f), new Vector3(.22f, 4, .28f), accent, false);
@@ -55,6 +57,33 @@ namespace ShiftFour
             else if (type == 1) Server(root, size, front, accent, m);
             else if (type == 2) Control(root, size, front, accent, m);
             else Storage(root, size, front, accent, m);
+
+            AddWalkableInterior(root, m, font, type);
+        }
+
+        public static void AddWalkableInterior(Transform root, PrototypeMaterials m, Font font, int type)
+        {
+            Vector3 size = Sizes[type];
+            float front = -FrontOffset(type);
+            float entranceWidth = type == 3 ? 10f : 4f;
+            Material facade = type == 1 ? m.Metal : m.Wall;
+            Transform walls = Group("Walls", root);
+            float sideX = (size.x - WallThickness) * .5f;
+            for (int side = -1; side <= 1; side += 2)
+            {
+                Box("Side wall", walls, new Vector3(side * sideX, size.y * .5f, 0),
+                    new Vector3(WallThickness, size.y, size.z), facade);
+                float panelWidth = (size.x - entranceWidth) * .5f;
+                Box("Entrance wall", walls, new Vector3(side * (entranceWidth + panelWidth) * .5f,
+                    size.y * .5f, front + WallThickness * .5f), new Vector3(panelWidth, size.y, WallThickness), facade);
+            }
+            Box("Rear wall", walls, new Vector3(0, size.y * .5f, -front - WallThickness * .5f),
+                new Vector3(size.x, size.y, WallThickness), facade);
+            float openingTop = FloorHeight + EntranceHeight;
+            Box("Door header", walls, new Vector3(0, (size.y + openingTop) * .5f, front + WallThickness * .5f),
+                new Vector3(entranceWidth, size.y - openingTop, WallThickness), facade);
+
+            ResearchInteriorBuilder.Build(Group("Interior", root, Vector3.up * FloorHeight), size, m, font, type);
         }
 
         private static void Checkpoint(Transform root, Vector3 size, float front, Material accent, PrototypeMaterials m)
@@ -95,7 +124,6 @@ namespace ShiftFour
         {
             for (int i = -2; i <= 2; i++)
             {
-                Box("Loading shutter rib", root, new Vector3(0, 1.9f + i * .6f, front - .28f), new Vector3(9.8f, .06f, .12f), m.Metal, false);
                 Box("Roof skylight", root, new Vector3(i * 5, size.y + .6f, 0), new Vector3(2, .4f, 17), m.Glass, false);
             }
             Box("Loading canopy", root, new Vector3(0, 5.6f, front - 2), new Vector3(19, .35f, 4), accent);

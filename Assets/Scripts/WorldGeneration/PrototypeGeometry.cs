@@ -40,7 +40,7 @@ namespace ShiftFour
         }
 
         public static TextMesh Label(string text, Transform parent, Vector3 position,
-            float characterSize, Font font, float maxWidth = 0, float maxHeight = 0)
+            float characterSize, Font font, float maxWidth, float maxHeight, Material lettering)
         {
             var label = Group(text, parent, position).gameObject.AddComponent<TextMesh>();
             label.text = text;
@@ -60,7 +60,15 @@ namespace ShiftFour
             if (maxWidth > 0 && bounds.x > maxWidth) scale = maxWidth / bounds.x;
             if (maxHeight > 0 && bounds.y > maxHeight) scale = Mathf.Min(scale, maxHeight / bounds.y);
             label.transform.localScale = Vector3.one * scale;
+            UseDepthTestedLettering(label, lettering);
             return label;
+        }
+
+        public static void UseDepthTestedLettering(TextMesh label, Material lettering)
+        {
+            if (lettering == null) return;
+            label.GetComponent<MeshRenderer>().sharedMaterial = lettering;
+            label.gameObject.AddComponent<PrototypeLabel>();
         }
     }
 }

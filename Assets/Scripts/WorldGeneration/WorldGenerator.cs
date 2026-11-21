@@ -7,10 +7,17 @@ using Random = System.Random;
 namespace ShiftFour
 {
     [DisallowMultipleComponent]
+    [DefaultExecutionOrder(-100)]
     public sealed class WorldGenerator : MonoBehaviour
     {
         private const float MinimumSize = 120f;
         private const float MaximumSize = 500f;
+        private const float DefaultBuildingSpacing = 18f;
+        private const float MaximumBuildingSpacing = 100f;
+        private const float PlotHalfWidth = 16f;
+        private const float PlotHalfDepth = 14f;
+        private const float SouthEdgeSetback = 24f;
+        private const float RowOffset = 1f;
         private const float AvenueWidth = 12f;
         private const float AccessWidth = 6f;
         private const float PropClearance = 3.5f;
@@ -18,42 +25,46 @@ namespace ShiftFour
         [SerializeField] private int seed = 1;
         [SerializeField] private bool randomSeedOnStart;
         [SerializeField, Range(MinimumSize, MaximumSize)] private float worldSize = OpenWorldPrototypeLayout.WorldSize;
+        [SerializeField, Range(0, MaximumBuildingSpacing)]
+        [Tooltip("Minimum clearance in metres between building foundations, subject to the selected world size.")]
+        private float buildingSpacing = DefaultBuildingSpacing;
         [SerializeField, Range(0, 4)] private float objectDensity = 1;
+        [SerializeField] private GameObject scoutPrefab;
+        [SerializeField, Range(6f, 40f)] private float scoutDetectionRange = 24f;
         [SerializeField] private Transform fixedLayout;
         [SerializeField] private Transform spawn;
         [SerializeField] private PrototypeMaterials materials;
-        [SerializeField, HideInInspector] private Vector3 fixedSpawnPosition;
         [SerializeField, HideInInspector] private Transform generatedContent;
 
-        public void Configure(Transform fallback, Transform playerSpawn, PrototypeMaterials palette)
+        public void Configure(Transform fallback, Transform playerSpawn, PrototypeMaterials palette, GameObject scout = null)
         {
             fixedLayout = fallback;
             spawn = playerSpawn;
             materials = palette;
-            fixedSpawnPosition = spawn.localPosition;
+            scoutPrefab = scout;
         }
 
         private void Awake()
         {
             int startupSeed = randomSeedOnStart ? BitConverter.ToInt32(Guid.NewGuid().ToByteArray(), 0) : seed;
-            GenerateLayout(startupSeed);
+            GenerateLayout(startupSeed, faceScoutAtSpawn: true);
         }
 
-        [ContextMenu("Generate")]
+        [ContextMenu("Generate World")]
         public void Generate() => GenerateLayout(seed);
 
-        [ContextMenu("Clear")]
+        [ContextMenu("Clear Generated World")]
         public void Clear()
         {
             if (!HasGeneratedContent()) return;
             Discard(generatedContent);
             generatedContent = null;
             if (fixedLayout != null) fixedLayout.gameObject.SetActive(true);
-            if (spawn != null) MoveSpawn(fixedSpawnPosition);
+            ResetPlayer(fixedLayout);
             MarkSceneDirty();
         }
 
-        private void GenerateLayout(int layoutSeed)
+        private void GenerateLayout(int layoutSeed, bool faceScoutAtSpawn = false)
         {
             Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             if (fixedLayout == null || spawn == null || font == null || !HasMaterials())
@@ -71,14 +82,22 @@ namespace ShiftFour
 
             float boundary = size * .5f - 4f;
             float usable = boundary - 5f;
+            // The south row must fit between its approach road and the requested gap.
+            float maxSpacing = Mathf.Min(MaximumBuildingSpacing, 2f * (usable - SouthEdgeSetback + RowOffset - PlotHalfDepth));
+            float spacing = float.IsNaN(buildingSpacing) ? DefaultBuildingSpacing : Mathf.Clamp(buildingSpacing, 0, maxSpacing);
+            if (spacing != buildingSpacing)
+                Debug.LogWarning($"Open World: requested building spacing {buildingSpacing:g} m. Using {spacing:g} m in the {size:g} m world so all four buildings and their approaches fit.", this);
+
             var random = new Random(layoutSeed);
-            var spawnPosition = new Vector3(0, .12f, -usable + 3f);
-            Transform next = Group("Generated Content", transform);
+            // Anchor the layout to the existing spawn, including when previewing a different size.
+            Vector3 entry = new Vector3(0, .12f, -usable + 9f);
+            Vector3 origin = transform.InverseTransformPoint(spawn.position) - entry;
+            Transform next = Group("GeneratedWorld", transform, origin);
             next.gameObject.SetActive(false);
             try
             {
                 Box("Ground", next, new Vector3(0, -.4f, 0), new Vector3(size, .8f, size), materials.Ground);
-                Vector3[] positions = PlaceBuildings(random, usable);
+                Vector3[] positions = PlaceBuildings(random, usable, spacing);
                 var reserved = new List<Rect>();
                 ResearchBuildingBuilder.Build(Group("Buildings", next), materials, font, positions);
                 BuildRoads(Group("Roads", next), usable, positions, reserved);
@@ -97,22 +116,38 @@ namespace ShiftFour
             fixedLayout.gameObject.SetActive(false);
             generatedContent = next;
             next.gameObject.SetActive(true);
-            MoveSpawn(spawnPosition);
+            ResetPlayer(next);
             MarkSceneDirty();
             Debug.Log($"Open World: generated seed {layoutSeed} ({size} × {size} m).", this);
+            if (Application.isPlaying)
+            {
+                var player = spawn.GetComponentInChildren<PlayerController>();
+                Transform marker = OutdoorScoutEncounter.Spawn(next, scoutPrefab, player,
+                    scoutDetectionRange, materials, font, layoutSeed);
+                if (faceScoutAtSpawn && marker != null &&
+                    !Physics.Linecast(player.EyePosition, marker.position, WeaponController.GameplayRaycastMask,
+                        QueryTriggerInteraction.Ignore))
+                {
+                    Vector3 heading = Vector3.ProjectOnPlane(marker.position - player.transform.position, Vector3.up);
+                    if (heading.sqrMagnitude > .01f) player.transform.rotation = Quaternion.LookRotation(heading);
+                }
+            }
         }
 
-        private static Vector3[] PlaceBuildings(Random random, float usable)
+        private static Vector3[] PlaceBuildings(Random random, float usable, float spacing)
         {
-            // One plot per quadrant. Plot sizes include the largest building's foundation.
-            // Both rows leave room on the south side for a road in front of each entrance.
+            // Reserve the central avenue and keep northern access roads clear of the southern foundations.
+            float minX = Mathf.Max(AvenueWidth * .5f + PlotHalfWidth + 2f, PlotHalfWidth + RowOffset + spacing * .5f);
+            float halfRowSeparation = Mathf.Max(21f, PlotHalfDepth + spacing * .5f);
             var positions = new Vector3[4];
             for (int i = 0; i < positions.Length; i++)
             {
                 bool west = i < 2;
                 bool south = i == 0 || i == 3;
-                float x = Between(random, 26f, usable - 16f) * (west ? -1 : 1);
-                float z = south ? Between(random, -usable + 24f, -22f) : Between(random, 24f, usable - 14f);
+                float x = Between(random, minX, usable - PlotHalfWidth) * (west ? -1 : 1);
+                float z = south
+                    ? Between(random, -usable + SouthEdgeSetback, RowOffset - halfRowSeparation)
+                    : Between(random, RowOffset + halfRowSeparation, usable - PlotHalfDepth);
                 positions[i] = new Vector3(x, 0, z);
             }
             return positions;
@@ -135,7 +170,9 @@ namespace ShiftFour
                 Road(building + " branch", roads, new Vector2(0, branchZ), new Vector2(plot.x, branchZ), AccessWidth, .075f, reserved);
                 Road(building + " approach", roads, new Vector2(plot.x, branchZ), new Vector2(plot.x, front - 4.5f), AccessWidth, .07f, reserved);
                 // Include the entire entrance apron, facade details and foundation in the prop exclusion area.
-                reserved.Add(Rect.MinMaxRect(plot.x - 16f, front - 8f, plot.x + 16f, plot.z + 14f));
+                // Keep the Checkpoint service ground and patrol forecourt clear.
+                float rearClearance = i == 0 && scoutPrefab != null ? 16f : PlotHalfDepth;
+                reserved.Add(Rect.MinMaxRect(plot.x - PlotHalfWidth, front - 8f, plot.x + PlotHalfWidth, plot.z + rearClearance));
             }
         }
 
@@ -226,20 +263,31 @@ namespace ShiftFour
 
         private bool HasGeneratedContent() => generatedContent != null && generatedContent.parent == transform;
 
-        private void MoveSpawn(Vector3 position)
+        private void ResetPlayer(Transform layout)
         {
+            if (!Application.isPlaying || spawn == null) return;
             var body = spawn.GetComponentInChildren<CharacterController>();
-            bool enabled = body != null && body.enabled;
+            if (body == null) return;
+            bool enabled = body.enabled;
             if (enabled) body.enabled = false;
-            spawn.localPosition = position;
-            if (body != null) body.transform.localPosition = Vector3.zero;
+            body.transform.position = spawn.position;
             if (enabled) body.enabled = true;
+            body.GetComponent<PlayerController>()?.ApplyCameraPose();
+            var checkpoint = layout != null ? layout.GetComponentInChildren<CheckpointSecurityScanner>() : null;
+            if (layout == fixedLayout && checkpoint != null) checkpoint.ResetMission();
+            body.GetComponent<PrototypePlayerFeedback>()?.SetCheckpoint(checkpoint);
+            Physics.SyncTransforms();
         }
 
         private void Discard(Transform content)
         {
             content.gameObject.SetActive(false);
-            if (Application.isPlaying) Destroy(content.gameObject);
+            if (Application.isPlaying)
+            {
+                // Destroy is deferred. Free the hierarchy name before returning to the caller.
+                content.name = "Retired GeneratedWorld";
+                Destroy(content.gameObject);
+            }
             else DestroyImmediate(content.gameObject);
         }
 

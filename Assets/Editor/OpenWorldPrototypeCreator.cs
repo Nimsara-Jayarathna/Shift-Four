@@ -12,6 +12,51 @@ public static class OpenWorldPrototypeCreator
 {
     public const string ScenePath = "Assets/Scenes/OpenWorldPrototype.unity";
     private const string MaterialsPath = "Assets/Materials/OpenWorldPrototype";
+    private const string OpenMenuPath = "Tools/Shift Four/Open Outdoor Prototype";
+
+    [MenuItem(OpenMenuPath, true)]
+    private static bool CanOpenPrototype() => !EditorApplication.isPlayingOrWillChangePlaymode;
+
+    [MenuItem(OpenMenuPath)]
+    public static void OpenPrototype()
+    {
+        if (!CanOpenPrototype()) return;
+        var prototype = AssetDatabase.LoadAssetAtPath<SceneAsset>(ScenePath);
+        if (prototype == null)
+        {
+            EditorUtility.DisplayDialog("Outdoor prototype missing",
+                "Use Tools > Shift Four > Create Open World Prototype to generate the scene.", "OK");
+            return;
+        }
+
+        Scene scene = SceneManager.GetActiveScene();
+        if (scene.path != ScenePath || SceneManager.sceneCount != 1)
+        {
+            if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;
+            scene = EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
+        }
+
+        var startScene = EditorSceneManager.playModeStartScene;
+        if (startScene != null && startScene != prototype)
+        {
+            string overridePath = AssetDatabase.GetAssetPath(startScene);
+            Debug.Log($"Outdoor prototype opened. The editor's Play Mode Start Scene is set to {overridePath}.");
+            if (!EditorUtility.DisplayDialog("Play Mode Start Scene",
+                $"Play Mode is set to start in {overridePath}. Clear this editor-only override to play the opened outdoor scene.",
+                "Clear override", "Keep override")) return;
+            EditorSceneManager.playModeStartScene = null;
+        }
+        else
+        {
+            Debug.Log(startScene == null
+                ? "Outdoor prototype opened. Play Mode Start Scene is unset."
+                : "Outdoor prototype opened. Play Mode Start Scene points to the outdoor prototype.");
+        }
+
+        Selection.activeGameObject = Array.Find(scene.GetRootGameObjects(), root => root.GetComponent<WorldGenerator>() != null);
+        if (SceneView.lastActiveSceneView != null)
+            SceneView.lastActiveSceneView.LookAt(new Vector3(0, 3, 8), Quaternion.Euler(35, -25, 0), 130);
+    }
 
     [MenuItem("Tools/Shift Four/Create Open World Prototype")]
     public static void Create()
@@ -58,7 +103,7 @@ public static class OpenWorldPrototypeCreator
             Selection.activeGameObject = world.gameObject;
             if (SceneView.lastActiveSceneView != null)
                 SceneView.lastActiveSceneView.LookAt(new Vector3(0, 3, 8), Quaternion.Euler(35, -25, 0), 130);
-            Debug.Log("Open World Prototype created: " + ScenePath + ". Press Play; WASD/arrows move, Shift sprints, mouse looks, Esc releases the cursor.");
+            Debug.Log("Open World Prototype created: " + ScenePath + ". Press Play to explore the research buildings.");
         }
         catch
         {
@@ -77,7 +122,8 @@ public static class OpenWorldPrototypeCreator
         Transform fixedLayout = PrototypeGeometry.Group("Fixed Layout", world);
         foreach (string name in new[] { "Ground", "Roads", "Buildings", "Environment" })
             world.Find(name).SetParent(fixedLayout, false);
-        world.gameObject.AddComponent<WorldGenerator>().Configure(fixedLayout, world.Find("Spawn"), materials);
+        var scout = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Agents/Scout.prefab");
+        world.gameObject.AddComponent<WorldGenerator>().Configure(fixedLayout, world.Find("Spawn"), materials, scout);
     }
 
     internal static PrototypeMaterials CreateMaterials(Shader lit)
@@ -98,7 +144,10 @@ public static class OpenWorldPrototypeCreator
             Checkpoint = Material("Checkpoint amber", lit, new Color(.72f, .51f, .25f)),
             Server = Material("Server blue", lit, new Color(.24f, .53f, .64f)),
             Control = Material("Control teal", lit, new Color(.30f, .61f, .51f)),
-            Storage = Material("Storage rust", lit, new Color(.66f, .37f, .25f))
+            Storage = Material("Storage rust", lit, new Color(.66f, .37f, .25f)),
+            ServerRack = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Sections/ServerRack.prefab"),
+            Lettering = AssetDatabase.LoadAssetAtPath<Material>("Assets/Environment/WorldBuilder/Room lettering.mat"),
+            CheckpointSignal = Material("Checkpoint signal", Shader.Find("Universal Render Pipeline/Unlit"), new Color(.24f, .98f, 1f))
         };
     }
 
@@ -110,7 +159,7 @@ public static class OpenWorldPrototypeCreator
         if (File.Exists(path)) throw new IOException("An incompatible asset already exists at " + path);
         var material = new Material(shader) { name = name };
         material.SetColor("_BaseColor", color);
-        material.SetFloat("_Smoothness", smoothness);
+        if (material.HasProperty("_Smoothness")) material.SetFloat("_Smoothness", smoothness);
         AssetDatabase.CreateAsset(material, path);
         return material;
     }

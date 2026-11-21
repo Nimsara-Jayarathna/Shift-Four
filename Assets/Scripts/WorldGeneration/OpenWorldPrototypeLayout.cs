@@ -96,8 +96,8 @@ namespace ShiftFour
             Transform sign = Group("Facility entry sign", environment, new Vector3(-13, 0, -89));
             Box("Sign plinth", sign, new Vector3(0, 1.8f, 0), new Vector3(7, 3.6f, .5f), m.Metal);
             Box("Sign accent", sign, new Vector3(-3.2f, 1.8f, -.3f), new Vector3(.15f, 3, .15f), m.Server, false);
-            Label("SHIFT-FOUR", sign, new Vector3(0, 2.3f, -.3f), .28f, font, 6, .9f);
-            Label("RESEARCH FACILITY", sign, new Vector3(0, 1.3f, -.3f), .16f, font, 6, .45f);
+            Label("SHIFT-FOUR", sign, new Vector3(0, 2.3f, -.3f), .28f, font, 6, .9f, m.Lettering);
+            Label("RESEARCH FACILITY", sign, new Vector3(0, 1.3f, -.3f), .16f, font, 6, .45f, m.Lettering);
         }
 
         internal static void Fence(Transform parent, Vector3 start, Vector3 end, PrototypeMaterials m)
@@ -117,24 +117,31 @@ namespace ShiftFour
 
         private static void BuildSpawn(Transform spawn)
         {
-            Transform explorer = Group("Prototype Explorer", spawn);
-            var body = explorer.gameObject.AddComponent<CharacterController>();
+            Transform player = Group("Player", spawn);
+            var body = player.gameObject.AddComponent<CharacterController>();
             body.height = 1.8f;
             body.radius = .35f;
             body.center = Vector3.up * .9f;
             body.skinWidth = .05f;
             body.minMoveDistance = 0;
             body.stepOffset = .3f;
-            var camera = Group("Exploration Camera", explorer, Vector3.up * 1.65f).gameObject.AddComponent<Camera>();
+            var camera = Group("First Person Camera", player, Vector3.up * 1.3f).gameObject.AddComponent<Camera>();
             camera.tag = "MainCamera";
             camera.fieldOfView = 64;
-            camera.nearClipPlane = .1f;
+            camera.nearClipPlane = .05f;
             camera.farClipPlane = 350;
             camera.clearFlags = CameraClearFlags.Skybox;
             camera.backgroundColor = new Color(.54f, .65f, .72f);
             camera.gameObject.AddComponent<UniversalAdditionalCameraData>();
             camera.gameObject.AddComponent<AudioListener>();
-            explorer.gameObject.AddComponent<PrototypeExplorer>().Configure(camera);
+            ConfigurePlayer(player.gameObject, camera);
+        }
+
+        public static void ConfigurePlayer(GameObject player, Camera camera)
+        {
+            player.AddComponent<Health>().Configure(100f, true);
+            player.AddComponent<PlayerController>().Configure(camera);
+            player.AddComponent<PrototypePlayerFeedback>();
         }
     }
 }
