@@ -112,7 +112,7 @@ namespace ShiftFour
             Label("RESEARCH FACILITY", sign, new Vector3(0, 1.3f, -.3f), .16f, font, 6, .45f, m.Lettering);
         }
 
-        internal static void Fence(Transform parent, Vector3 start, Vector3 end, PrototypeMaterials m)
+        internal static void Fence(Transform parent, Vector3 start, Vector3 end, PrototypeMaterials m, OutdoorScenery scenery = null)
         {
             float length = Vector3.Distance(start, end);
             Transform fence = Group("Perimeter fence", parent, (start + end) * .5f);
@@ -120,11 +120,23 @@ namespace ShiftFour
             var collision = fence.gameObject.AddComponent<BoxCollider>();
             collision.center = Vector3.up * 1.25f;
             collision.size = new Vector3(length, 2.5f, .25f);
-            foreach (float y in new[] { .35f, 1.3f, 2.3f })
-                Box("Fence rail", fence, Vector3.up * y, new Vector3(length, .08f, .08f), m.Metal, false);
             int posts = Mathf.CeilToInt(length / 6);
+            var parts = scenery != null ? new CombineInstance[3 + posts + 1] : null;
+            Mesh cube = parts != null ? Resources.GetBuiltinResource<Mesh>("Cube.fbx") : null;
+            int index = 0;
+            foreach (float y in new[] { .35f, 1.3f, 2.3f })
+                Part("Fence rail", Vector3.up * y, new Vector3(length, .08f, .08f));
             for (int i = 0; i <= posts; i++)
-                Box("Fence post", fence, new Vector3(-length * .5f + i * length / posts, 1.3f, 0), new Vector3(.14f, 2.6f, .14f), m.Metal, false);
+                Part("Fence post", new Vector3(-length * .5f + i * length / posts, 1.3f, 0), new Vector3(.14f, 2.6f, .14f));
+            if (cube != null) scenery.PublishFence(fence, parts, m.Metal);
+
+            void Part(string label, Vector3 position, Vector3 size)
+            {
+                if (cube == null)
+                    Box(label, fence, position, size, m.Metal, false);
+                else
+                    parts[index++] = new CombineInstance { mesh = cube, transform = Matrix4x4.TRS(position, Quaternion.identity, size) };
+            }
         }
 
         private static void BuildSpawn(Transform spawn)

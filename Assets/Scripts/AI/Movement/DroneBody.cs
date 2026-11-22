@@ -23,7 +23,7 @@ namespace ShiftFour
         private readonly RaycastHit[] sweepHits = new RaycastHit[32];
         private Vector3 avoidanceHeading;
         private float clearanceSpeed;
-        private bool detouring;
+        private bool detouring, syncBeforeSweep;
         private Vector3 detourPoint;
         private float flightOffset;
         private static readonly float[] AvoidanceAngles = { 30f, -30f, 60f, -60f, 90f, -90f, 120f, -120f };
@@ -70,6 +70,12 @@ namespace ShiftFour
         {
             float distance = displacement.magnitude;
             if (distance < .00001f) return position;
+            if (syncBeforeSweep)
+            {
+                // Only bodies about to query physics need this frame's actor and door transforms.
+                using (SyncMarker.Auto()) Physics.SyncTransforms();
+                syncBeforeSweep = false;
+            }
             float allowed = distance;
             int count=Physics.BoxCastNonAlloc(position+EnvelopeCenter,envelopeExtents,displacement/distance,
                 sweepHits,Quaternion.identity,distance+clearance,~0,QueryTriggerInteraction.Ignore);
@@ -131,8 +137,7 @@ namespace ShiftFour
         {
             if (!agent.isActiveAndEnabled || !agent.isOnNavMesh || (motor != null && !motor.enabled)) return;
             using var sample = BodyMarker.Auto();
-            using (SyncMarker.Auto())
-                Physics.SyncTransforms(); // Includes this frame's CharacterController movement and opening gates.
+            syncBeforeSweep = true;
             Vector3 start = transform.position;
             Vector3 desired = agent.nextPosition;
             blocker = null;
@@ -165,7 +170,7 @@ namespace ShiftFour
             }
             // Never project/warp a collision correction across an edge or a carved gate.
             if (agent.Raycast(safe, out _)) safe = start;
-            transform.position = safe;
+            if (!safe.Equals(start)) transform.position = safe;
             agent.nextPosition = safe;
             if (MotionBlocked) agent.velocity = Vector3.zero;
         }

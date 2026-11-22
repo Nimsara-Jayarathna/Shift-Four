@@ -596,6 +596,8 @@ namespace ShiftFour.Tests
             var health = playerObject.GetComponent(healthType);
             brainType.GetMethod("Start", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(brain, null);
             brainType.GetField("player", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(brain, player);
+            // This isolated fixture has no GameSession to bind the target and its health in Start.
+            brainType.GetField("playerHealth", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(brain, health);
             var see = brainType.GetMethod("CanSeePlayer", BindingFlags.NonPublic | BindingFlags.Instance);
             var fire = brainType.GetMethod("TryShoot", BindingFlags.NonPublic | BindingFlags.Instance);
             Physics.SyncTransforms();

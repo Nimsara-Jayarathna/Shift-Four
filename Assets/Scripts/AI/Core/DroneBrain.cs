@@ -332,13 +332,18 @@ namespace ShiftFour
                 outdoorAttackBudget?.RecordFire(health);
                 HasCommittedToAttack = true;
                 if (outdoorPatrol == null) Awareness?.CommitToCombat(Time.time);
-                LastShotOrigin = origin;
-                LastShotHit = hitPoint;
                 WeaponAimPoint = player.EyePosition;
                 playerHealth.ApplyDamage(DamagePerShot, this, "Drone shot: " + agentName);
-                ShotFired?.Invoke(this);
+                PublishAcceptedShot(origin, hitPoint);
                 SoundEvents.ReportNoise(origin, NoiseCategory.Gunshot, 1f, this);
             }
+        }
+
+        internal void PublishAcceptedShot(Vector3 origin, Vector3 hit)
+        {
+            LastShotOrigin = origin;
+            LastShotHit = hit;
+            ShotFired?.Invoke(this);
         }
 
         private bool ClearShot(Vector3 origin, Vector3 vector, float range)

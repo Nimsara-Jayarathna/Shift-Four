@@ -22,6 +22,7 @@ namespace ShiftFour
         [Tooltip("Exponential blend time constant; roughly three times this value reaches 95%.")]
         [SerializeField, Range(.05f, .5f)] private float blendSeconds = .18f;
         private double phase, elapsed, weight;
+        private bool outdoorBreathing;
 
         public float BreathsPerMinute => breathsPerMinute;
         public float VerticalAmplitude => verticalAmplitude;
@@ -46,6 +47,15 @@ namespace ShiftFour
             breathsPerMinute = configuration.BreathsPerMinute; verticalAmplitude = configuration.IdleAmplitude;
         }
 
+        internal void ConfigureOutdoorHandling()
+        {
+            outdoorBreathing = true;
+            verticalAmplitude = .0021f;
+            lateralAmplitude = .0007f;
+            depthAmplitude = .0012f;
+            pitchAmplitude = .16f;
+        }
+
         public void ResetMotion()
         {
             phase = elapsed = weight = 0;
@@ -62,6 +72,8 @@ namespace ShiftFour
             double angle = phase * Math.PI * 2;
             float breath = (float)(Math.Sin(angle) * weight);
             float secondary = (float)(Math.Sin(angle * 2) * weight);
+            // The shorter inhale leads the small chest/hand lift. Both channels loop continuously.
+            if (outdoorBreathing) breath = .86f * breath + .14f * secondary;
             PositionOffset = new Vector3(lateralAmplitude * secondary, verticalAmplitude * breath, depthAmplitude * breath);
             RotationOffset = Quaternion.Euler(pitchAmplitude * breath, yawAmplitude * secondary, rollAmplitude * secondary);
         }

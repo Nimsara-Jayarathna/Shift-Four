@@ -61,6 +61,18 @@ namespace ShiftFour
             support.Solve(supportHandTarget.position + supportOffset, supportHandTarget.rotation, supportElbowHint.position, maximumWristDeviation, configuredPronation, configuredPronation > 0 ? 1 : 0);
         }
 
+        internal void SetOutdoorPistolGrip()
+        {
+            // Seat the palm pads a few millimetres farther onto the authored backstrap.
+            rightHandTarget.localPosition += new Vector3(-.003f, .002f, 0);
+            supportHandTarget.localPosition += new Vector3(.004f, .002f, .002f);
+        }
+
+        internal void PoseKnifeWrist(Vector3 position, Quaternion rotation, float turn)
+        {
+            dominant.Solve(position, rotation, rightElbowHint.position, maximumWristDeviation, 32f * turn);
+        }
+
         public void ApplyMagazinePose(Transform magazineGrip, float contactWeight, float forearmTwistLimit, float handClearance)
         {
             if (!Initialize()) return;

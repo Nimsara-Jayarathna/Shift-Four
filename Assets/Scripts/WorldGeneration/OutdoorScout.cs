@@ -266,7 +266,7 @@ namespace ShiftFour
             {
                 encounter.RecordFire(health);
                 playerHealth.ApplyDamage(damage, source, "Drone shot: Outdoor Scout");
-                effects.Fire(muzzle, hit.point, .11f, .13f);
+                source.PublishAcceptedShot(muzzle, hit.point);
                 SoundEvents.ReportNoise(muzzle, NoiseCategory.Gunshot, 1f, source);
             }
             if (!reportedDamage)

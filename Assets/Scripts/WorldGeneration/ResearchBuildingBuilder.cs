@@ -85,8 +85,9 @@ namespace ShiftFour
                 Box("Entrance wall", walls, new Vector3(side * (entranceWidth + panelWidth) * .5f,
                     size.y * .5f, front + WallThickness * .5f), new Vector3(panelWidth, size.y, WallThickness), facade);
             }
+            // A lighter end wall silhouettes the dark server racks and indoor guards from the aisle.
             Box("Rear wall", walls, new Vector3(0, size.y * .5f, -front - WallThickness * .5f),
-                new Vector3(size.x, size.y, WallThickness), facade);
+                new Vector3(size.x, size.y, WallThickness), type == 1 ? m.Concrete : facade);
             float openingTop = FloorHeight + EntranceHeight;
             Box("Door header", walls, new Vector3(0, (size.y + openingTop) * .5f, front + WallThickness * .5f),
                 new Vector3(entranceWidth, size.y - openingTop, WallThickness), facade);
@@ -129,11 +130,11 @@ namespace ShiftFour
 
             Material signal = m.CheckpointSignal != null ? m.CheckpointSignal : m.Marking;
             var markerTint = new MaterialPropertyBlock();
-            markerTint.SetColor("_BaseColor", new Color(1f, .83f, .05f));
-            Transform marker = Group("Temporary exterior test marker", exterior, new Vector3(0, 8.18f, front - 6.52f));
-            var back = Box("Yellow marker board", marker, Vector3.zero, new Vector3(13.4f, 1.32f, .2f), signal, false);
+            markerTint.SetColor("_BaseColor", new Color(.90f, .60f, .19f));
+            Transform marker = Group("Security clearance sign", exterior, new Vector3(0, 8.18f, front - 6.52f));
+            var back = Box("Amber warning board", marker, Vector3.zero, new Vector3(13.4f, 1.32f, .2f), signal, false);
             back.GetComponent<Renderer>().SetPropertyBlock(markerTint);
-            var text = Label("TEST EXTERIOR UPGRADE", marker, new Vector3(0, 0, -.12f),
+            var text = Label("RESTRICTED  /  AUTHORIZED ENTRY", marker, new Vector3(0, 0, -.12f),
                 .64f, font, 12.8f, .96f, m.Lettering);
             var markerText = text.GetComponent<Renderer>();
             markerText.GetPropertyBlock(markerTint);
@@ -144,14 +145,14 @@ namespace ShiftFour
             for (int side = -1; side <= 1; side += 2)
             {
                 bool red = side < 0;
-                Color color = red ? new Color(1, .13f, .09f) : new Color(.83f, .94f, 1);
-                var lens = Box(red ? "Red warning lens" : "White inspection lens", exterior,
+                Color color = red ? new Color(1, .13f, .09f) : new Color(1f, .83f, .58f);
+                var lens = Box(red ? "Red warning lens" : "Amber inspection lens", exterior,
                     new Vector3(side * 3.72f, red ? 3.78f : 3.29f, front - .996f),
                     new Vector3(.38f, red ? .38f : .22f, .12f), signal, false);
                 markerTint.SetColor("_BaseColor", color);
                 lens.GetComponent<Renderer>().SetPropertyBlock(markerTint);
 
-                var lamp = Group(red ? "Red warning light" : "White inspection light", exterior,
+                var lamp = Group(red ? "Red warning light" : "Amber inspection light", exterior,
                     lens.transform.localPosition + Vector3.back * .12f).gameObject.AddComponent<Light>();
                 lamp.type = LightType.Point;
                 lamp.color = color;

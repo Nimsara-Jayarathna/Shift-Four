@@ -10,9 +10,13 @@ namespace ShiftFour
     {
         private static readonly Vector3 RestPosition = new Vector3(.205f, -.16f, .53f);
         private static readonly Quaternion RestAngle = Quaternion.Euler(8f, -14f, -8f);
-        private const float SwingDuration = .26f;
+        private const float SwingDuration = .30f;
+        private FirstPersonMovementMotion movement;
         private const int ViewmodelLayer = 2; // Existing weapon presentation / Ignore Raycast layer.
 
+        private FirstPersonPistolGrip knifeGrip;
+        private Vector3 wristRest;
+        private Quaternion wristRotation;
         private Camera localCamera;
         private Renderer[] renderers;
         private Mesh bladeMesh, rightArmMesh;
@@ -24,6 +28,8 @@ namespace ShiftFour
             root.localRotation = RestAngle;
             var model = root.gameObject.AddComponent<OutdoorKnifeViewmodel>();
             model.localCamera = camera;
+            model.movement = root.gameObject.AddComponent<FirstPersonMovementMotion>();
+            model.movement.ConfigureOutdoorHandling();
 
             Transform gripAnchor = Group("Knife grip anchor", root, new Vector3(.013f, -.045f, -.044f));
             gripAnchor.localRotation = Quaternion.Euler(19f, 0f, 3f);
@@ -42,18 +48,42 @@ namespace ShiftFour
             return model;
         }
 
-        internal void Present(bool visible, float swingStarted)
+        internal void Present(bool visible, float draw, float swingStarted, bool hit)
         {
             if (gameObject.activeSelf != visible) gameObject.SetActive(visible);
             if (!visible) return;
 
-            float elapsed = Time.time - swingStarted;
-            float sweep = elapsed < SwingDuration ? Mathf.Sin(Mathf.PI * Mathf.Clamp01(elapsed / SwingDuration)) : 0f;
-            float breath = Mathf.Sin(Time.time * 1.7f);
-            transform.localPosition = RestPosition + Vector3.up * (.002f * breath) +
-                new Vector3(-.19f, .041f, .038f) * sweep;
-            transform.localRotation = RestAngle * Quaternion.Euler(-12f * sweep, -27f * sweep, 46f * sweep);
+            float t = Time.time - swingStarted;
+            // Preload the wrist on draw and at the end of recovery. The player's existing
+            // instantaneous damage query releases that pose directly into the stroke.
+            float windup = (1f - Ramp(t, 0f, .045f) + Ramp(t, .22f, SwingDuration)) * draw;
+            float slash = Ramp(t + .012f, 0f, hit ? .065f : .105f) *
+                (1f - Ramp(t, hit ? .09f : .12f, SwingDuration)) * (hit ? .76f : 1f);
+            float impact = hit ? (1f - Ramp(t, 0f, .09f)) : 0;
+            movement.SamplePlayer(Time.deltaTime, t < SwingDuration || draw < 1f);
+            float breath = Mathf.Sin(Time.time * 1.6f) * movement.IdleWeight;
+            Vector3 offset = new Vector3(.029f, .016f, -.024f) * windup +
+                new Vector3(-.215f, -.049f, .095f) * slash;
+            Vector3 angles = new Vector3(-8f, 10f, -14f) * windup + new Vector3(14f, -37f, 52f) * slash;
+            offset += Vector3.back * (.017f * impact);
+            transform.localPosition = RestPosition + (movement.PositionOffset + Vector3.up * (.002f * breath)) * draw +
+                new Vector3(.025f, -.37f, -.035f) * (1f - draw);
+            transform.localRotation = RestAngle * Quaternion.Euler(new Vector3(23f, 0, 12f) * (1f - draw)) * movement.RotationOffset;
+            if (knifeGrip != null)
+            {
+                // The wrist carries the knife. The shoulder stays at the camera-side end of the sleeve.
+                knifeGrip.PoseKnifeWrist(transform.TransformPoint(wristRest + offset * draw),
+                    transform.rotation * Quaternion.Euler(angles * draw) * wristRotation, slash * draw);
+            }
+            else
+            {
+                transform.localPosition += offset * draw;
+                transform.localRotation *= Quaternion.Euler(angles * draw);
+            }
         }
+
+        private static float Ramp(float t, float start, float end) =>
+            Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(start, end, t));
 
         private void BuildGrip(Transform anchor, PrototypeMaterials materials)
         {
@@ -71,6 +101,9 @@ namespace ShiftFour
                 rig.Skin.sharedMesh = rightArmMesh;
                 rig.Skin.updateWhenOffscreen = true;
                 anchor.SetParent(rig.RightHand, true);
+                knifeGrip = pose;
+                wristRest = transform.InverseTransformPoint(pose.RightHandTarget.position);
+                wristRotation = Quaternion.Inverse(transform.rotation) * pose.RightHandTarget.rotation;
                 return;
             }
 

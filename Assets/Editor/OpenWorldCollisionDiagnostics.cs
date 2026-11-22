@@ -21,12 +21,20 @@ public static class OpenWorldCollisionDiagnostics
         var generator = Object.FindAnyObjectByType<WorldGenerator>();
         Transform world = generator != null ? generator.transform.Find("GeneratedWorld") : null;
         var player = generator != null ? generator.GetComponentInChildren<PlayerController>() : null;
+        string report = Inspect(world, player, out bool problems);
+        if (problems) Debug.LogWarning(report, generator);
+        else Debug.Log(report, generator);
+    }
+
+    internal static string Inspect(Transform world, PlayerController player, out bool problems)
+    {
         if (world == null || player == null || !player.TryGetComponent(out CharacterController capsule))
         {
-            Debug.LogWarning("Collision report: generated world or player capsule is missing.");
-            return;
+            problems = true;
+            return "Collision report: generated world or player capsule is missing.";
         }
 
+        var generator = world.GetComponentInParent<WorldGenerator>();
         Physics.SyncTransforms();
         var output = new StringBuilder($"Open World collision report · seed {generator.GeneratedSeed}\n");
         var issues = new List<string>();
@@ -112,15 +120,16 @@ public static class OpenWorldCollisionDiagnostics
         {
             if (!drone.TryGetComponent(out Health health) || !health.IsAlive) continue;
             checkedDrones++;
-            if (!drone.TryGetComponent(out NavMeshAgent agent) || !agent.isOnNavMesh ||
+            if (!drone.TryGetComponent(out NavMeshAgent agent) || !agent.isActiveAndEnabled || !agent.isOnNavMesh ||
                 !drone.TryGetComponent(out DroneBody body) || !drone.TryGetComponent(out CapsuleCollider hull) ||
                 !hull.enabled || !body.CanOccupy(drone.transform.position))
                 issues.Add($"{drone.name} is missing a hull, off NavMesh or overlapping a solid.");
         }
         output.AppendLine($"Checked {checkedDrones} living drone hulls.");
 
-        if (issues.Count == 0) Debug.Log(output.Append("No collision issues found in this snapshot.").ToString(), generator);
-        else Debug.LogWarning(output.AppendJoin("\n", issues).ToString(), generator);
+        problems = issues.Count != 0;
+        return problems ? output.AppendJoin("\n", issues).ToString() :
+            output.Append("No collision issues found in this snapshot.").ToString();
 
         bool CheckClear(string label, Vector3 feet, Collider allowed = null)
         {

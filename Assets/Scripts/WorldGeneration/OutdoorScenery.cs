@@ -13,18 +13,22 @@ namespace ShiftFour
 
         private readonly List<Mesh> ownedMeshes = new List<Mesh>();
 
-        internal static void ApplyLighting(Light sun)
+        internal static void ApplyLighting(Light sun, float fogDensity)
         {
+            RenderSettings.ambientMode = AmbientMode.Trilight;
+            RenderSettings.ambientSkyColor = new Color(.55f, .64f, .74f);
+            RenderSettings.ambientEquatorColor = new Color(.38f, .46f, .51f);
+            RenderSettings.ambientGroundColor = new Color(.25f, .28f, .27f);
+            RenderSettings.fogMode = FogMode.ExponentialSquared;
+            RenderSettings.fog = fogDensity > 0;
+            RenderSettings.fogColor = new Color(.48f, .57f, .63f);
+            RenderSettings.fogDensity = Mathf.Clamp(fogDensity, 0, .012f);
             if (sun == null) return;
-            sun.transform.rotation = Quaternion.Euler(33f, -38f, 0);
-            sun.color = new Color(1, .91f, .78f);
-            sun.intensity = 1.18f;
-            sun.shadowStrength = .78f;
-            RenderSettings.ambientSkyColor = new Color(.54f, .65f, .75f);
-            RenderSettings.ambientEquatorColor = new Color(.43f, .47f, .44f);
-            RenderSettings.ambientGroundColor = new Color(.28f, .30f, .24f);
-            RenderSettings.fogColor = new Color(.62f, .71f, .74f);
-            RenderSettings.fogDensity = .0046f;
+            sun.transform.rotation = Quaternion.Euler(29f, -48f, 0);
+            sun.color = new Color(1f, .90f, .78f);
+            sun.intensity = 1.06f;
+            sun.shadowStrength = .65f;
+            sun.shadows = LightShadows.Soft;
         }
 
         internal void Build(int seed, float size, float treeDensity, float grassDensity, Detail detail,
@@ -50,7 +54,7 @@ namespace ShiftFour
                 center.y = .018f;
                 var across = Vector3.right * (halfSlab.x + .52f);
                 var along = Vector3.forward * (halfSlab.z + .52f);
-                var gravel = new Color(.43f, .39f, .30f);
+                var gravel = new Color(.38f, .38f, .34f);
                 shoulders.Face(center - across - along, center - across + along, center + across - along, gravel, .8f);
                 shoulders.Face(center + across - along, center - across + along, center + across + along, gravel, .8f);
             }
@@ -91,7 +95,9 @@ namespace ShiftFour
 
                 // A jittered stand follows each flank of the ridge; its footprint is outside the playable site.
                 int columns = Mathf.CeilToInt(size / 4f * treeDensity);
-                for (int row = 0; row < 3; row++)
+                // A fourth, low-poly line on the far ridge adds depth to Standard scenery.
+                int rows = detailed ? 4 : 3;
+                for (int row = 0; row < rows; row++)
                     for (int i = 0; i < columns; i++)
                     {
                         float u = -1 + 2 * (i + Range(random, .12f, .88f)) / columns;
@@ -168,6 +174,15 @@ namespace ShiftFour
             Publish(stones, material, "Boulders and scree");
         }
 
+        internal void PublishFence(Transform fence, CombineInstance[] parts, Material metal)
+        {
+            var mesh = new Mesh { name = "Perimeter rails and posts" };
+            ownedMeshes.Add(mesh);
+            mesh.CombineMeshes(parts);
+            fence.gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
+            fence.gameObject.AddComponent<MeshRenderer>().sharedMaterial = metal;
+        }
+
         private void BuildFenceInfill(Material metal)
         {
             // Make the solid perimeter visible between the existing rails in one render mesh.
@@ -226,14 +241,19 @@ namespace ShiftFour
             if (trunk)
                 Crown(batch, r, p, height * .028f, height * .94f, 6, new Color(.31f, .245f, .17f), 0);
             float width = Range(r, .18f, .26f) * height;
-            Color needles = Color.Lerp(new Color(.095f, .205f, .155f), new Color(.24f, .37f, .23f), Range(r, 0, 1));
+            // Vary neighboring stands without consuming placement RNG or changing trunk footprints.
+            float stand = Mathf.PerlinNoise(p.x * .08f + 19f, p.z * .08f);
+            float vigor = .55f * stand + .45f * Range(r, 0, 1);
+            Color needles = Color.Lerp(new Color(.095f, .19f, .17f), new Color(.29f, .39f, .22f), vigor);
+            float firstTier = Mathf.Lerp(.16f, .33f, stand);
+            float crownDepth = Mathf.Lerp(.30f, .42f, vigor);
             int tiers = detailed ? 7 : 4;
             for (int i = 0; i < tiers; i++)
             {
                 float t = (float)i / (tiers - 1);
-                Vector3 basePoint = p + Vector3.up * (height * Mathf.Lerp(.22f, .84f, t));
-                Crown(batch, r, basePoint, width * Mathf.Lerp(1, .21f, t), height * Mathf.Lerp(.34f, .19f, t),
-                    detailed ? 16 : 10, needles * Mathf.Lerp(.82f, 1.23f, t), .24f);
+                Vector3 basePoint = p + Vector3.up * (height * Mathf.Lerp(firstTier, .84f, t));
+                Crown(batch, r, basePoint, width * Mathf.Lerp(1, .21f, t), height * Mathf.Lerp(crownDepth, .19f, t),
+                    detailed ? 16 : 10, needles * Mathf.Lerp(.78f, 1.24f, t), Mathf.Lerp(.19f, .29f, stand));
             }
         }
 
@@ -334,7 +354,9 @@ namespace ShiftFour
             batch.Points.Clear(); batch.Colors.Clear(); batch.Triangles.Clear();
         }
 
-        private void OnDestroy()
+        private void OnDestroy() => ReleaseMeshes();
+
+        internal void ReleaseMeshes()
         {
             foreach (Mesh mesh in ownedMeshes)
             {
@@ -342,6 +364,7 @@ namespace ShiftFour
                 if (Application.isPlaying) Destroy(mesh);
                 else DestroyImmediate(mesh);
             }
+            ownedMeshes.Clear();
         }
     }
 }

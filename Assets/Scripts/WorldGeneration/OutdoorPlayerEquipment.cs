@@ -11,6 +11,9 @@ namespace ShiftFour
         private ControlLockdownMission controlMission;
         private WeaponController weapons;
         private OutdoorKnifeViewmodel knife;
+        private FirstPersonWeaponMount mount;
+        private readonly FirstPersonEquipTransition knifeDraw = new FirstPersonEquipTransition();
+        private bool wantsKnife = true, hitDrone;
         private float range, damage, cooldown, nextSlash, swingStarted;
         private float serverKeyNoticeUntil, controlKeyNoticeUntil, storageKeyNoticeUntil;
         internal bool HasSupplies { get; private set; }
@@ -39,6 +42,7 @@ namespace ShiftFour
         {
             player = actor;
             weapons = controller;
+            mount = actor.GetComponent<FirstPersonWeaponMount>();
         }
 
         internal void BuildKnife(Camera view, PrototypeMaterials materials)
@@ -108,18 +112,21 @@ namespace ShiftFour
             BindCheckpointMission(null);
             BindServerMission(null);
             BindControlMission(null);
+            wantsKnife = true;
+            hitDrone = false;
+            knifeDraw.ResetReady(Time.timeAsDouble);
             nextSlash = 0f;
             swingStarted = float.NegativeInfinity;
             if (weapons != null) weapons.ClearLoadout();
-            RefreshKnife();
+            PresentKnife();
         }
 
         internal bool CollectSupplies()
         {
-            if (HasSupplies || Pistol == null || player == null || !player.CanAct || !weapons.Equip(Pistol))
+            if (HasSupplies || Pistol == null || player == null || !player.CanAct || !mount.EquipLowered(Pistol))
                 return false;
             HasSupplies = true;
-            RefreshKnife();
+            wantsKnife = false;
             return true;
         }
 
@@ -128,46 +135,75 @@ namespace ShiftFour
             if (Input.GetKeyDown(KeyCode.Alpha1)) SelectKnife();
             else if (Input.GetKeyDown(KeyCode.Alpha2)) SelectPistol();
 
-            if (!KnifeSelected) weapons.ProcessInput();
+            if (!wantsKnife && !KnifeSelected) weapons.ProcessInput();
             else if (Input.GetMouseButtonDown(0)) TrySlash();
         }
 
         internal void SelectKnife()
         {
-            if (!player.CanAct || KnifeSelected) return;
-            swingStarted = float.NegativeInfinity;
-            weapons.Holster();
-            RefreshKnife();
+            if (!player.CanAct || wantsKnife) return;
+            wantsKnife = true;
+            mount.RequestUnequip();
         }
 
         internal bool SelectPistol()
         {
-            if (!HasSupplies || !weapons.Equip(Pistol)) return false;
-            RefreshKnife();
+            if (!HasSupplies || !player.CanAct || !wantsKnife) return false;
+            if (KnifeSelected && !mount.EquipLowered(Pistol)) return false;
+            wantsKnife = false;
             return true;
         }
 
         internal bool TrySlash()
         {
-            if (!KnifeSelected || !player.CanAct || Time.time < nextSlash) return false;
+            if (!wantsKnife || !KnifeSelected || knifeDraw.State != WeaponPresentationState.Ready ||
+                !player.CanAct || Time.time < nextSlash) return false;
             nextSlash = Time.time + cooldown;
             swingStarted = Time.time;
-            Camera camera = player.ViewCamera;
-            if (Physics.Raycast(player.EyePosition, camera.transform.forward, out RaycastHit hit, range,
-                    WeaponController.GameplayRaycastMask, QueryTriggerInteraction.Ignore))
-            {
-                var target = hit.collider.GetComponentInParent<Health>();
-                if (target != null && target.GetComponent<DroneBrain>() != null)
-                    target.ApplyDamage(damage, player, "Knife melee");
-            }
+            hitDrone = ResolveStrike();
             return true;
         }
 
-        private void LateUpdate() => RefreshKnife();
-
-        private void RefreshKnife()
+        private bool ResolveStrike()
         {
-            if (knife != null) knife.Present(KnifeSelected && player.CanPresentWeapon, swingStarted);
+            Camera camera = player.ViewCamera;
+            if (!Physics.Raycast(player.EyePosition, camera.transform.forward, out RaycastHit hit, range,
+                    WeaponController.GameplayRaycastMask, QueryTriggerInteraction.Ignore)) return false;
+            var target = hit.collider.GetComponentInParent<Health>();
+            if (target == null || !target.IsAlive || !target.TryGetComponent<DroneBrain>(out _)) return false;
+            target.ApplyDamage(damage, player, "Knife melee");
+            return true;
+        }
+
+        private void LateUpdate()
+        {
+            if (player == null || !player.CanAct)
+            {
+                swingStarted = float.NegativeInfinity;
+                PresentKnife();
+                return;
+            }
+
+            double now = Time.timeAsDouble;
+            knifeDraw.Sample(now);
+            if (wantsKnife)
+            {
+                if (!KnifeSelected && mount.TransitionState == WeaponPresentationState.Hidden) weapons.Holster();
+                if (KnifeSelected) knifeDraw.RequestEquip(now, .19f);
+            }
+            else
+            {
+                knifeDraw.RequestUnequip(now, .14f);
+                if (knifeDraw.State == WeaponPresentationState.Hidden) mount.RequestEquip();
+            }
+
+            PresentKnife();
+        }
+
+        private void PresentKnife()
+        {
+            if (knife != null) knife.Present(player != null && player.CanPresentWeapon &&
+                knifeDraw.State != WeaponPresentationState.Hidden, knifeDraw.Visibility, swingStarted, hitDrone);
         }
     }
 }

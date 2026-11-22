@@ -36,6 +36,8 @@ namespace ShiftFour
         [Tooltip("Scales patches of grass, undergrowth and loose stones in open ground.")]
         [SerializeField, Range(0, 2)] private float grassDensity = 1;
         [SerializeField] private OutdoorScenery.Detail sceneryDetail = OutdoorScenery.Detail.Standard;
+        [Tooltip("Exponential-squared distance haze. Zero gives clear air. Applied when the world generates.")]
+        [SerializeField, Range(0, .012f)] private float fogDensity = .0072f;
         [Header("Prototype knife")]
         [SerializeField, Range(.5f, 3f)] private float knifeRange = 1.85f;
         [SerializeField, Range(1f, 100f)] private float knifeDamage = 35f;
@@ -198,14 +200,17 @@ namespace ShiftFour
                     Debug.LogWarning($"Open World supply cache: no clear roadside placement for seed {layoutSeed}.", this);
                 OpenWorldExtractionGate.Build(next, -boundary, materials, font);
                 Transform environment = Group("Environment", next);
-                BuildFence(Group("Fences", environment), boundary);
+                var scenery = environment.gameObject.AddComponent<OutdoorScenery>();
+                BuildFence(Group("Fences", environment), boundary, scenery);
                 float trees = Mathf.Clamp(treeDensity, 0, 1.5f);
                 Scatter(environment, random, usable, density, reserved, trees, layoutSeed);
-                environment.gameObject.AddComponent<OutdoorScenery>().Build(layoutSeed, size, trees,
+                scenery.Build(layoutSeed, size, trees,
                     Mathf.Clamp(grassDensity, 0, 2), sceneryDetail, reserved, materials);
             }
             catch (Exception exception)
             {
+                // Unity skips OnDestroy on components whose staged world was never activated.
+                next.GetComponentInChildren<OutdoorScenery>(true)?.ReleaseMeshes();
                 Discard(next);
                 Debug.LogWarning($"Open World: generation failed for seed {layoutSeed}. Keeping the current layout. {exception}", this);
                 return false;
@@ -217,7 +222,7 @@ namespace ShiftFour
             GeneratedSeed = layoutSeed;
             next.gameObject.SetActive(true);
             if (Application.isPlaying && gameObject.scene == UnityEngine.SceneManagement.SceneManager.GetActiveScene())
-                OutdoorScenery.ApplyLighting(RenderSettings.sun);
+                OutdoorScenery.ApplyLighting(RenderSettings.sun, fogDensity);
             ResetPlayer(next);
             MarkSceneDirty();
             Debug.Log($"Open World: generated seed {layoutSeed} ({size} × {size} m).", this);
@@ -264,7 +269,7 @@ namespace ShiftFour
                 if (patrols != null)
                     foreach (var zone in next.GetComponentsInChildren<IndoorGuardZone>())
                         zone.ListenForScoutAlerts(patrols);
-                ConfigureDroneCombat(next, patrols);
+                ConfigureDroneCombat(next, patrols, player != null ? player.ViewCamera : null);
                 player?.GetComponent<PrototypePlayerFeedback>()?.SetDroneTargets(combatDrones);
                 var extractionGate = next.GetComponentInChildren<OpenWorldExtractionGate>();
                 if (extractionGate != null)
@@ -289,7 +294,7 @@ namespace ShiftFour
         private void OnEnable() => SoundEvents.NoiseEmitted += OnPrototypeGunfire;
         private void OnDisable() => SoundEvents.NoiseEmitted -= OnPrototypeGunfire;
 
-        private void ConfigureDroneCombat(Transform layout, OutdoorScoutEncounter outdoors)
+        private void ConfigureDroneCombat(Transform layout, OutdoorScoutEncounter outdoors, Camera viewer)
         {
             outdoorCombat = outdoors;
             combatDrones = layout.GetComponentsInChildren<DroneBrain>();
@@ -306,6 +311,7 @@ namespace ShiftFour
                 // 1911 body shots deal about 18.3 HP after the shared combat duration scaling.
                 float maximum = drone switch { ScoutBrain => 35f, GuardBrain => 48f, FlankerBrain => 54f, _ => 51f };
                 drone.ConfigurePrototypeCombat(tuning, slot, maximum, drone is GuardBrain ? null : outdoors);
+                drone.GetComponentInChildren<DroneRotorVisuals>()?.ConfigureOutdoorFlight(viewer, slot);
             }
         }
 
@@ -355,7 +361,8 @@ namespace ShiftFour
             Road("Extraction approach", roads, new Vector2(0, -boundary + 1f), new Vector2(0, -avenueEnd), 10f, .09f, reserved);
             reserved.Add(Rect.MinMaxRect(-7f, -boundary - 4f, 7f, -boundary + 10f));
             for (float z = -usable + 5f; z < usable - 3f; z += 10f)
-                Box("Lane marking", roads, new Vector3(0, .083f, z), new Vector3(.18f, .006f, 3), materials.Marking, false);
+                Box("Lane marking", roads, new Vector3(0, .083f, z), new Vector3(.18f, .006f, 3), materials.Marking, false)
+                    .GetComponent<Renderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
 
             for (int i = 0; i < positions.Length; i++)
             {
@@ -382,19 +389,19 @@ namespace ShiftFour
             reserved.Add(new Rect(center - size * .5f, size));
         }
 
-        private void BuildFence(Transform fences, float edge)
+        private void BuildFence(Transform fences, float edge, OutdoorScenery scenery)
         {
             var southWest = new Vector3(-edge, 0, -edge);
             var northWest = new Vector3(-edge, 0, edge);
             var northEast = new Vector3(edge, 0, edge);
             var southEast = new Vector3(edge, 0, -edge);
-            OpenWorldPrototypeLayout.Fence(fences, southWest, northWest, materials);
-            OpenWorldPrototypeLayout.Fence(fences, northWest, northEast, materials);
-            OpenWorldPrototypeLayout.Fence(fences, northEast, southEast, materials);
+            OpenWorldPrototypeLayout.Fence(fences, southWest, northWest, materials, scenery);
+            OpenWorldPrototypeLayout.Fence(fences, northWest, northEast, materials, scenery);
+            OpenWorldPrototypeLayout.Fence(fences, northEast, southEast, materials, scenery);
             // The extraction gate replaces this span of the south perimeter.
             float gap = OpenWorldExtractionGate.HalfWidth;
-            OpenWorldPrototypeLayout.Fence(fences, southWest, new Vector3(-gap, 0, -edge), materials);
-            OpenWorldPrototypeLayout.Fence(fences, new Vector3(gap, 0, -edge), southEast, materials);
+            OpenWorldPrototypeLayout.Fence(fences, southWest, new Vector3(-gap, 0, -edge), materials, scenery);
+            OpenWorldPrototypeLayout.Fence(fences, new Vector3(gap, 0, -edge), southEast, materials, scenery);
         }
 
         private void Scatter(Transform environment, Random random, float usable, float density, List<Rect> reserved,

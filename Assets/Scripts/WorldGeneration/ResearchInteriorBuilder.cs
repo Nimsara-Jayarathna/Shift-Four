@@ -6,10 +6,17 @@ namespace ShiftFour
     // Props sit outside the central walkable aisle. Only the scanner spans it, above head height.
     internal static class ResearchInteriorBuilder
     {
+        // Slightly tinted task lights retain neutral highlights on keycards, terminals and power cells.
+        private static readonly Color[] RoomLights =
+        {
+            new Color(1f, .81f, .59f), new Color(.68f, .85f, 1f),
+            new Color(.66f, .94f, .86f), new Color(1f, .75f, .51f)
+        };
+
         internal static void Build(Transform root, Vector3 size, PrototypeMaterials m, Font font, int type)
         {
             Transform fixtures = Group("Lighting", root);
-            Lighting(fixtures, size, type == 1 ? new Color(.7f, .86f, 1f) : new Color(1f, .95f, .86f), m);
+            Lighting(fixtures, size, RoomLights[type], m);
             for (int side = -1; side <= 1; side += 2)
                 Box("Aisle guide", root, new Vector3(side * 1.7f, .006f, -1),
                     new Vector3(.045f, .012f, size.z - 5), m.Marking, false);
@@ -26,6 +33,8 @@ namespace ShiftFour
 
         private static void Lighting(Transform fixtures, Vector3 size, Color color, PrototypeMaterials m)
         {
+            var diffuserColor = new MaterialPropertyBlock();
+            diffuserColor.SetColor("_BaseColor", Color.Lerp(color, Color.white, .30f));
             const float fixtureHeight = 4.6f;
             float suspension = size.y - ResearchBuildingBuilder.FloorHeight - fixtureHeight;
             for (int x = -1; x <= 1; x += 2)
@@ -34,12 +43,16 @@ namespace ShiftFour
                 Transform fixture = Group("Pendant light", fixtures,
                     new Vector3(x * size.x * .23f, fixtureHeight, z * size.z * .22f));
                 Box("Suspension", fixture, Vector3.up * (suspension * .5f), new Vector3(.07f, suspension, .07f), m.Metal, false);
-                Box("Diffuser", fixture, Vector3.zero, new Vector3(2.5f, .13f, .45f), m.Marking, false);
+                var diffuser = Box("Diffuser", fixture, Vector3.zero, new Vector3(2.5f, .13f, .45f), m.CheckpointSignal != null ? m.CheckpointSignal : m.Marking, false);
+                diffuser.GetComponent<Renderer>().SetPropertyBlock(diffuserColor);
                 var light = Group("Indoor fill", fixture, Vector3.down * .17f).gameObject.AddComponent<Light>();
-                light.type = LightType.Point;
+                light.type = LightType.Spot;
+                light.transform.localRotation = Quaternion.Euler(90f, 0, 0);
+                light.spotAngle = 138f;
+                light.innerSpotAngle = 86f;
                 light.color = color;
-                light.range = 15f;
-                light.intensity = 4.5f;
+                light.range = 11.5f;
+                light.intensity = 5.8f;
                 light.shadows = LightShadows.None;
             }
         }
@@ -118,7 +131,14 @@ namespace ShiftFour
                     Vector3 rackSize = new Vector3(2, 2.2f, 1.6f);
                     if (m.ServerRack != null)
                     {
-                        Object.Instantiate(m.ServerRack, rack, false).name = "Server rack mesh";
+                        Transform mesh = Object.Instantiate(m.ServerRack, rack, false).transform;
+                        mesh.name = "Server rack mesh";
+                        var chassis = mesh.Find("Server_Steel");
+                        if (chassis != null && chassis.TryGetComponent<Renderer>(out var steel))
+                            steel.sharedMaterial = m.Metal;
+                        var leds = mesh.Find("Server_Cyan");
+                        if (m.CheckpointSignal != null && leds != null && leds.TryGetComponent<Renderer>(out var lamps))
+                            lamps.sharedMaterial = m.CheckpointSignal;
                         rack.gameObject.AddComponent<BoxCollider>().size = rackSize;
                     }
                     else
@@ -264,7 +284,7 @@ namespace ShiftFour
                 {
                     float y = .28f + tier * 1.25f;
                     Box("Shelf deck", shelf, Vector3.up * y, new Vector3(4.2f, .14f, 1.95f), m.Metal);
-                    Box("Cargo crate", shelf, new Vector3(side * (tier - 1), y + .47f, 0), new Vector3(1.25f, .8f, 1.45f), m.Crate);
+                    Box("Cargo crate", shelf, new Vector3(side * (tier - 1), y + .47f, 0), new Vector3(1.25f, .8f, 1.45f), tier == 1 ? m.Storage : m.Crate);
                 }
                 Box("Cargo crate", props, new Vector3(side * 7, .85f, -3.8f), new Vector3(1.7f, 1.7f, 1.7f), m.Crate);
             }

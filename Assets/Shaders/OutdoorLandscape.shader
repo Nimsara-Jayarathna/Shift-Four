@@ -69,22 +69,27 @@ Shader "ShiftFour/Outdoor Landscape"
                     float mottling = Noise(p * .66);
                     if (_LandscapeSurface < .5)
                     {
-                        float cover = Noise(p * .095) * .55 + Noise(p * .23 + 13) * .32 + mottling * .13;
-                        half3 grass = lerp(half3(.22,.31,.15), half3(.46,.49,.24), mottling);
-                        half3 earth = lerp(half3(.31,.245,.16), half3(.49,.45,.34), Noise(p * 2.4));
-                        albedo = lerp(earth, grass, smoothstep(.29,.53,cover + .17*grit));
-                        float blades = Noise(float2(p.x * 28 + p.y * 8,p.y * 7));
-                        albedo *= 1 + .26 * grit + .30 * (blades-.5) * detailFade;
+                        // Broad drainage patches bend across the site, breaking up the fine grain.
+                        float drainage = Noise(p * .042 + float2(6,17));
+                        float cover = .58 * drainage + .29 * Noise(p * .19 + drainage * 2.8) + .13 * mottling;
+                        half3 grass = lerp(half3(.205,.275,.185), half3(.37,.40,.25), mottling);
+                        half3 earth = lerp(half3(.265,.24,.20), half3(.41,.37,.30), Noise(p * 1.8));
+                        albedo = lerp(earth, grass, smoothstep(.33,.58,cover + .11*grit));
+                        float litter = Noise(float2(p.x * 17 + p.y * 6,p.y * 9));
+                        albedo *= 1 + .30 * grit + .23 * (litter-.5) * detailFade;
                     }
                     else
                     {
+                        // Offset panel joints every other row. Wear and stains cross slab boundaries.
                         float2 slab = p / float2(4,5);
+                        slab.x += frac(floor(slab.y) * .5);
                         float2 joint = abs(frac(slab+.5)-.5) * float2(4,5);
                         float aa = max(.008, length(fwidth(p))*.6);
                         float seam = 1 - smoothstep(.014,.014+aa,min(joint.x,joint.y));
                         seam *= saturate(.055/aa);
-                        half concrete = .43 + .045 * (Hash(floor(slab))-.5) + .075*(mottling-.5) + .14*grit;
-                        albedo = concrete * half3(.94,.98,1) * (1-.42*seam);
+                        float damp = smoothstep(.45,.78,Noise(p*.14 + mottling*.5));
+                        float concrete = .42 + .055*(Hash(floor(slab))-.5) + .08*(mottling-.5) + .13*grit;
+                        albedo = concrete * lerp(half3(1,.99,.94),half3(.76,.80,.82),damp) * (1-.30*seam);
                     }
                 }
                 else
@@ -92,17 +97,23 @@ Shader "ShiftFour/Outdoor Landscape"
                     // Imported primitive fallback foliage has no painted vertices.
                     albedo = i.color.a > .9 ? _BaseColor.rgb : i.color.rgb;
                     if (i.color.a > .70 && i.color.a < .90)
-                        albedo *= 1 + .48 * (Noise(p * 24) - .5) * saturate(1-length(fwidth(p))*9);
+                    {
+                        float gravel = Noise(p * 1.7) * .20 + (Noise(p * 24) - .5) * .47 * saturate(1-length(fwidth(p))*9);
+                        albedo *= .90 + gravel;
+                    }
                     else if (i.color.a > .25 && i.color.a < .70)
                     {
                         float2 outcrop = p + i.world.y * float2(.37,.69);
                         float strata = Noise(outcrop * float2(.55,1.13)) + Noise(outcrop * 2.7) * .34;
-                        albedo *= .80 + .32 * strata;
+                        float moss = smoothstep(.49,.80,strata) * saturate(i.normal.y);
+                        albedo = lerp(albedo, albedo * half3(.78,.92,.66), moss * .65);
+                        albedo *= .76 + .37 * strata;
                     }
                 }
                 half3 normal = normalize(i.normal);
                 Light sun = GetMainLight(TransformWorldToShadowCoord(i.world));
-                half3 light = max(.15h, SampleSH(normal)) + sun.color * saturate(dot(normal,sun.direction)) * sun.shadowAttenuation;
+                half shade = lerp(sun.shadowAttenuation, 1, GetMainLightShadowFade(i.world));
+                half3 light = max(.15h, SampleSH(normal)) + sun.color * saturate(dot(normal,sun.direction)) * shade;
                 return half4(MixFog(albedo * light, i.fog), 1);
             }
             ENDHLSL

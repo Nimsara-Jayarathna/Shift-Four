@@ -55,7 +55,7 @@ namespace ShiftFour
             prototype = prototypeOnly;
             session = game; player = actor;
             health = player != null ? player.GetComponent<Health>() : null;
-            weapons = !prototype && player != null ? player.Weapons : null;
+            weapons = player != null ? player.Weapons : null;
             drones.Clear();
             if (targets != null) foreach (var target in targets)
             {
@@ -69,6 +69,15 @@ namespace ShiftFour
             }
             ResetPresentation();
             if (isActiveAndEnabled) Bind();
+        }
+
+        private void Start()
+        {
+            // The first world is generated before PlayerController.Awake creates the weapon controller.
+            if (!prototype || weapons != null || player == null) return;
+            Unbind();
+            weapons = player.Weapons;
+            Bind();
         }
 
         private void OnEnable() { ResetPresentation(); Bind(); }
@@ -123,7 +132,15 @@ namespace ShiftFour
             hitUntil = Time.unscaledTime + .22f;
             if (damage.Fatal) defeatUntil = Time.unscaledTime + .65f;
         }
-        private void OnShot(WeaponShot _) => shotAt = Time.unscaledTime;
+        private void OnShot(WeaponShot shot)
+        {
+            shotAt = Time.unscaledTime;
+            if (!prototype || !shot.HasHit || shot.Hit.collider == null) return;
+            var victim = shot.Hit.collider.GetComponentInParent<Health>();
+            if (victim == null || victim.LastDamage.Attacker != player || victim.LastDamage.Time != shot.Time ||
+                !victim.TryGetComponent<DroneBrain>(out _)) return;
+            victim.GetComponentInChildren<DroneRotorVisuals>()?.Effects?.Impact(shot.Hit.point, shot.Hit.normal);
+        }
 
         private bool CanShowCombat => prototype ? player != null && player.isActiveAndEnabled && health != null && health.IsAlive :
             session != null && !session.Ended;

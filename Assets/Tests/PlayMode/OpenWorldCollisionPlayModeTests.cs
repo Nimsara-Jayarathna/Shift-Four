@@ -42,6 +42,47 @@ namespace ShiftFour.Tests
         }
 
         [UnityTest]
+        public IEnumerator RegenerationReleasesFenceMeshesAndSharedDroneMaterials()
+        {
+            foreach (int seed in new[] { 1234, 5678, 9012 })
+            {
+                Generate(seed);
+                yield return null;
+                Transform fences = World.Find("Environment/Fences");
+                Assert.That(fences.childCount, Is.EqualTo(5));
+                Mesh fenceMesh = null;
+                foreach (Transform span in fences)
+                {
+                    var collider = span.GetComponent<BoxCollider>();
+                    AssertSolid(collider);
+                    Assert.That(span.GetComponentsInChildren<MeshRenderer>().Length, Is.EqualTo(1));
+                    fenceMesh = span.GetComponent<MeshFilter>().sharedMesh;
+                    Assert.That(fenceMesh.bounds.size.x, Is.EqualTo(collider.size.x + .14f).Within(.01f));
+                    Assert.That(fenceMesh.bounds.size.y, Is.EqualTo(2.6f).Within(.01f));
+                }
+
+                var renderers = World.GetComponentsInChildren<Renderer>(true);
+                Material barrels = CheckShared("Weapon housing");
+                Material traces = CheckShared("Accepted shot tracer");
+                Call(generator, "Clear");
+                yield return null;
+                yield return null;
+                Assert.That(fenceMesh == null && barrels == null && traces == null, Is.True,
+                    $"Seed {seed} retained native rendering resources after clear.");
+
+                Material CheckShared(string name)
+                {
+                    var matches = renderers.Where(r => r.name == name).ToArray();
+                    Assert.That(matches.Length, Is.EqualTo(25), name);
+                    var materials = matches.Select(r => r.sharedMaterial).Distinct().ToArray();
+                    Assert.That(materials.Length, Is.EqualTo(1), name);
+                    Assert.That(materials[0] != null, Is.True, name);
+                    return materials[0];
+                }
+            }
+        }
+
+        [UnityTest]
         public IEnumerator FacadesStopTheCapsuleAtVisibleSurfacesAcrossSeeds()
         {
             Transform previousFacade = null;
@@ -442,6 +483,92 @@ namespace ShiftFour.Tests
         }
 
         [UnityTest]
+        public IEnumerator FirstGeneratedWorldShowsPistolSparksAtAcceptedContact()
+        {
+            var crate = World.Find("OutdoorSupplyCache01/Supply crate");
+            Call(Action(crate), "Interact");
+            var mount = player.GetComponent(RuntimeType("FirstPersonWeaponMount"));
+            for (int i = 0; i < 150 && !(bool)mount.GetType().GetProperty("IsReady").GetValue(mount); i++)
+                yield return null;
+
+            var target = Find("ScoutBrain").First();
+            var health = target.GetComponent(RuntimeType("Health"));
+            Vector3 center = target.GetComponent<CapsuleCollider>().bounds.center;
+            RaycastHit contact = default;
+            bool clear = false;
+            for (int a = 0; a < 360 && !clear; a += 45)
+            {
+                Vector3 eye = center + Quaternion.Euler(0f, a, 0f) * Vector3.forward * 2.5f;
+                capsule.enabled = false;
+                player.transform.position += eye - camera.transform.position;
+                capsule.enabled = true;
+                camera.transform.LookAt(center);
+                Physics.SyncTransforms();
+                clear = Physics.Raycast(camera.transform.position, camera.transform.forward, out contact, 4f,
+                    Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore) &&
+                    contact.collider.GetComponentInParent(RuntimeType("Health")) == health;
+            }
+            Assert.That(clear, Is.True);
+            var sparks = target.GetComponentsInChildren<LineRenderer>().Where(r => r.name.StartsWith("Impact spark")).ToArray();
+            Assert.That(sparks.Length, Is.EqualTo(8));
+            Assert.That(sparks.All(r => !r.enabled), Is.True);
+            var hud = player.GetComponent(RuntimeType("CombatHud"));
+            Call(hud, "Update");
+            Assert.That(Call(hud, "IsDroneBarVisible", target), Is.False, "Aiming alone never reveals the bar");
+            var weapon = player.GetComponent(RuntimeType("WeaponController"));
+            Assert.That(Call(weapon, "TryFire"), Is.EqualTo(true));
+            Call(hud, "Update");
+            Assert.That(Call(hud, "IsDroneBarVisible", target), Is.True, "The hit reveals this Scout's bar");
+            Assert.That(Call(weapon, "TryFire"), Is.EqualTo(false));
+            yield return null;
+            Assert.That(sparks.All(r => r.enabled), Is.True);
+            Assert.That(Vector3.Distance(sparks[0].GetPosition(0), contact.point), Is.LessThan(.22f));
+            yield return new WaitForSeconds(.4f);
+            Assert.That(sparks.All(r => !r.enabled), Is.True);
+            Call(health, "TakeDamage", 1000f);
+            Call(hud, "Update");
+            Assert.That(Call(hud, "IsDroneBarVisible", target), Is.False, "The bar hides immediately on death");
+        }
+
+        [UnityTest]
+        public IEnumerator GeneratedFlightRigsKeepHitboxesOutsideTheAnimatedModelAcrossSeeds()
+        {
+            Transform previous = null;
+            foreach (int seed in new[] { 1234, 5678, 9012 })
+            {
+                Generate(seed);
+                yield return null;
+                var visuals = World.GetComponentsInChildren(RuntimeType("DroneRotorVisuals"));
+                Assert.That(visuals.Length, Is.EqualTo(25));
+                Assert.That(previous == null, Is.True, "Regeneration retired the old rig");
+                foreach (var visual in visuals)
+                {
+                    var root = visual.GetComponentInParent<NavMeshAgent>().transform;
+                    Transform rig = root.Find("Flight hitboxes");
+                    Assert.That(rig, Is.Not.Null, root.name);
+                    Assert.That(root.Cast<Transform>().Count(t => t.name == rig.name), Is.EqualTo(1));
+                    Assert.That(visual.GetComponentsInChildren<Collider>().Any(c => c.enabled), Is.False);
+                    Assert.That(visual.GetComponentsInChildren<Transform>().Count(t => t.name.StartsWith("Animated Rotor")), Is.EqualTo(4));
+                    var brain = root.GetComponent(RuntimeType("DroneBrain"));
+                    Assert.That(visual.GetType().GetField("flightRole", Members).GetValue(visual).ToString(),
+                        Is.EqualTo(brain.GetType().Name.Replace("Brain", "")));
+                    var shapes = rig.GetComponentsInChildren<MeshCollider>();
+                    Assert.That(shapes.Length, Is.GreaterThanOrEqualTo(5));
+                    var rest = shapes.Select(c => c.transform.localToWorldMatrix).ToArray();
+                    var original = visual.transform.localRotation;
+                    visual.transform.localRotation = original * Quaternion.Euler(3f, 0f, 2f);
+                    for (int i = 0; i < shapes.Length; i++)
+                    {
+                        Assert.That(shapes[i].enabled && shapes[i].sharedMesh != null, Is.True);
+                        Assert.That(shapes[i].transform.localToWorldMatrix, Is.EqualTo(rest[i]));
+                    }
+                    visual.transform.localRotation = original;
+                    previous = rig;
+                }
+            }
+        }
+
+        [UnityTest]
         public IEnumerator AllDroneHullsStartClearAndDefeatedDronesStopAndSettle()
         {
             Generate(1234);
@@ -486,6 +613,8 @@ namespace ShiftFour.Tests
             {
                 var rigidbody = wreck.GetComponent<Rigidbody>();
                 Assert.That(rigidbody, Is.Not.Null);
+                Assert.That(Physics.DefaultRaycastLayers & (1 << wreck.gameObject.layer), Is.Zero,
+                    "Falling debris cannot intercept interaction rays");
                 Assert.That(Physics.GetIgnoreCollision(wreck.GetComponent<Collider>(), capsule), Is.True);
             }
 

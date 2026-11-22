@@ -9,7 +9,12 @@ using UnityEngine.SceneManagement;
 public static class OpenWorldDroneDiagnostics
 {
     [MenuItem("Tools/Shift Four/Report Open World AI")]
-    public static void Report()
+    public static void Report() => Inspect(false);
+
+    [MenuItem("Tools/Shift Four/Report Open World QA")]
+    public static void ReportQuality() => Inspect(true);
+
+    private static void Inspect(bool summary)
     {
         Scene scene = SceneManager.GetActiveScene();
         if (scene.path != OpenWorldPrototypeCreator.ScenePath || !EditorApplication.isPlaying)
@@ -28,7 +33,7 @@ public static class OpenWorldDroneDiagnostics
             return;
         }
 
-        var output = new StringBuilder($"Open World AI report · seed {generator.GeneratedSeed}\n");
+        var output = new StringBuilder($"Open World {(summary ? "QA" : "AI")} report · seed {generator.GeneratedSeed}\n");
         var drones = world.GetComponentsInChildren<DroneBrain>(true);
         var settings = new SerializedObject(generator);
         bool issues = false;
@@ -48,9 +53,10 @@ public static class OpenWorldDroneDiagnostics
 
         var extraction = world.GetComponentInChildren<OpenWorldMissionManager>();
         if (extraction == null || !extraction.HasPlayer ||
+            extraction.RegisteredBuildingMissions != OpenWorldMissionManager.RequiredMissions ||
             extraction.RegisteredDrones != OpenWorldMissionManager.RequiredDrones)
         {
-            output.AppendLine("Extraction manager, player or required drone references missing.");
+            output.AppendLine("Extraction manager, player, building mission or required drone references missing.");
             issues = true;
         }
 
@@ -64,6 +70,8 @@ public static class OpenWorldDroneDiagnostics
                 (drone is ScoutBrain ? !drone.TryGetComponent<OutdoorScout>(out _) : health.IsAlive && !drone.enabled);
             bool alive = IsAlive(drone);
             bool navigationMissing = alive && !AgentIsReady(agent);
+            if (summary && !missing && !navigationMissing && (!alive || visuals.isActiveAndEnabled)) continue;
+            missing |= alive && visuals != null && !visuals.isActiveAndEnabled;
             string decision = drone switch
             {
                 ScoutBrain when drone.TryGetComponent(out OutdoorScout scout) => scout.State.ToString(),
@@ -73,8 +81,31 @@ public static class OpenWorldDroneDiagnostics
                 _ => drone.CurrentDecision
             };
             output.AppendLine($"  {drone.name} · {(alive ? decision : "defeated or inactive")}" +
-                (missing ? " [missing combat reference]" : "") + (navigationMissing ? " [off NavMesh]" : ""));
+                (agent == null ? " [missing NavMeshAgent]" : "") +
+                (visuals == null || visuals.WeaponMount == null || visuals.Effects == null ? " [missing animation or effect rig]" : "") +
+                (missing ? " [incomplete drone setup]" : "") + (navigationMissing ? " [off NavMesh]" : ""));
             issues |= missing || navigationMissing;
+        }
+
+        if (summary)
+        {
+            int worlds = generator.transform.Cast<Transform>().Count(t => t.gameObject.activeInHierarchy && t.name == "GeneratedWorld");
+            int gates = generator.GetComponentsInChildren<OpenWorldExtractionGate>().Length;
+            int managers = generator.GetComponentsInChildren<OpenWorldMissionManager>().Length;
+            var huds = generator.GetComponentsInChildren<PrototypePlayerFeedback>();
+            bool bindings = worlds == 1 && gates == 1 && managers == 1 && huds.Length == 1 &&
+                huds[0].ExtractionManager == extraction;
+            output.AppendLine($"Active worlds {worlds}, gates {gates}, managers {managers}, HUDs {huds.Length}" +
+                (bindings ? "." : " [missing, duplicate or disconnected]."));
+            issues |= !bindings;
+            var renderers = world.GetComponentsInChildren<Renderer>();
+            output.AppendLine($"Layout renderers {renderers.Length}, enabled shadow casters " +
+                $"{renderers.Count(r => r.enabled && r.shadowCastingMode != UnityEngine.Rendering.ShadowCastingMode.Off)}, " +
+                $"enabled lights {world.GetComponentsInChildren<Light>().Count(l => l.enabled)}. " +
+                $"Editor draw calls in last render: {UnityStats.drawCalls}.");
+            output.AppendLine(OpenWorldCollisionDiagnostics.Inspect(world,
+                generator.GetComponentInChildren<PlayerController>(), out bool collisionIssues));
+            issues |= collisionIssues;
         }
 
         if (issues) Debug.LogWarning(output.ToString(), generator);
@@ -95,5 +126,5 @@ public static class OpenWorldDroneDiagnostics
     private static bool IsAlive(DroneBrain drone) =>
         drone.gameObject.activeInHierarchy && drone.TryGetComponent(out Health health) && health.IsAlive;
 
-    private static bool AgentIsReady(NavMeshAgent agent) => agent != null && agent.isOnNavMesh;
+    private static bool AgentIsReady(NavMeshAgent agent) => agent != null && agent.isActiveAndEnabled && agent.isOnNavMesh;
 }

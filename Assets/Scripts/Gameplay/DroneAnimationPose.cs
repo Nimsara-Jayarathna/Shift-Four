@@ -5,6 +5,8 @@ namespace ShiftFour
     public enum DroneVisualState { Idle, Moving, Turning, Braking, Firing, Damaged, Shutdown,
         CriticalFailure, Falling, GroundImpact, Disabled }
 
+    public enum DroneFlightRole { Default, Guard, Scout, Flanker, Interceptor }
+
     /// <summary>Presentation state only. Explicit time steps make damping and rotor travel testable.</summary>
     public sealed class DroneAnimationPose
     {
@@ -27,6 +29,22 @@ namespace ShiftFour
         private float clock, fireTime, hitTime, previousSpeed, deceleration;
         private float accelerationTarget, cuePhase, scanPhase, scanBlend;
         private bool dead;
+        public DroneFlightRole Role { get; set; }
+        public float TiltLimit => Role switch
+        {
+            DroneFlightRole.Guard => 3f,
+            DroneFlightRole.Scout => 8f,
+            DroneFlightRole.Flanker => 12f,
+            DroneFlightRole.Interceptor => 14f,
+            _ => 4f
+        };
+
+        private float lateralAcceleration, preparation, trackingYaw;
+        public void SetFlightCues(float lateral, bool preparing)
+        {
+            lateralAcceleration = float.IsFinite(lateral) ? Mathf.Clamp(lateral, -1f, 1f) : 0f;
+            preparation = preparing ? 1f : 0f;
+        }
 
         public DroneAnimationPose() { }
 
@@ -99,11 +117,26 @@ namespace ShiftFour
             float bankTarget = dead ? 0f : -Mathf.Clamp(yawDegreesPerSecond / 90f, -1f, 1f) * BankDegrees -
                 Mathf.Clamp(localVelocity.x, -1f, 1f) * .4f + HitFlash * .8f;
             bankTarget += dead ? 0f : Mathf.Sin(clock * 1.5f) * .12f * (1f - Mathf.Clamp01(speed));
+            if (!dead && Role != DroneFlightRole.Default)
+            {
+                float limit = TiltLimit;
+                // Positive local X pitches a Unity +Z nose down. Braking lifts it again.
+                float cruise = Mathf.Clamp(localVelocity.z, -1f, 1f);
+                pitchTarget = limit * (.16f * cruise + .75f * ForwardAcceleration
+                    - .72f * Mathf.Clamp01(deceleration)) - FireFlash * 1.5f - preparation * 2f;
+                float turn = Mathf.Clamp(yawDegreesPerSecond / 100f, -1f, 1f) * Mathf.Clamp01(speed * 2f);
+                float side = Role == DroneFlightRole.Flanker ? .85f : .40f;
+                bankTarget = -limit * (.7f * turn + lateralAcceleration * side)
+                    + HitFlash * Mathf.Sin(HitFlash * Mathf.PI * 2f) * Mathf.Min(4f, limit);
+            }
             Pitch = Damp(Pitch, pitchTarget, 9f, dt);
             Bank = Damp(Bank, bankTarget, 9f, dt);
             ShutdownBlend = Damp(ShutdownBlend, dead ? 1f : 0f, 5f, dt);
             Hover = Mathf.Sin(clock * 3f) * HoverAmplitude * (1f - ShutdownBlend);
             float target = dead ? 0f : .8f + Mathf.Clamp01(speed) * .2f + ForwardAcceleration * .06f + FireFlash * .12f;
+            if (!dead && Role != DroneFlightRole.Default)
+                target = .66f + .36f * Mathf.Clamp01(speed) + .21f * ForwardAcceleration
+                    + .10f * Mathf.Abs(lateralAcceleration) + .15f * preparation + .12f * FireFlash;
             float rate = dead ? 4f : 8f;
             float decay = Mathf.Exp(-rate * dt);
             // Integrate the exponential exactly: spin-down angle is independent of frame rate.
@@ -111,6 +144,12 @@ namespace ShiftFour
             RotorSpeed = target + (RotorSpeed - target) * decay;
             if (dead && RotorSpeed < .001f) RotorSpeed = 0f;
             StepAwareness(dt, speed);
+            if (!dead && Role == DroneFlightRole.Guard)
+            {
+                // The chassis briefly trails the actual heading as the gimbal tracks a threat.
+                trackingYaw = Damp(trackingYaw, -Mathf.Clamp(yawDegreesPerSecond / 90f, -1f, 1f) * 1.4f, 7f, dt);
+                ScanYaw += trackingYaw;
+            }
         }
 
         private void StepAwareness(float dt, float speed)
@@ -128,6 +167,12 @@ namespace ShiftFour
             Color color = combat ? new Color(1f,.06f,.12f) : scanning ? new Color(1f,.55f,.08f) : new Color(1f,.72f,.12f);
             AlertColor = Color.Lerp(AlertColor, color, 1f - Mathf.Exp(-8f * dt));
             scanBlend = Damp(scanBlend, scanning ? 1f : 0f, 4f, dt);
+            if (Role == DroneFlightRole.Scout)
+            {
+                float scan = scanning ? 4f : AwarenessState == DroneAwarenessState.Patrol ? 1.8f : 0f;
+                ScanYaw = Damp(ScanYaw, Mathf.Sin(scanPhase) * scan, 6f, dt);
+                return;
+            }
             // Scanning never turns the navigation root or competes with a moving bank.
             ScanYaw = Mathf.Sin(scanPhase) * 1.2f * scanBlend * (1f - Mathf.Clamp01(speed / .12f)) *
                 (1f - Mathf.Max(FireFlash, HitFlash));
