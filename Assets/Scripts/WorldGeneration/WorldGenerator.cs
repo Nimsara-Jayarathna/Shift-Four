@@ -36,6 +36,10 @@ namespace ShiftFour
         [Tooltip("Scales patches of grass, undergrowth and loose stones in open ground.")]
         [SerializeField, Range(0, 2)] private float grassDensity = 1;
         [SerializeField] private OutdoorScenery.Detail sceneryDetail = OutdoorScenery.Detail.Standard;
+        [Header("Prototype knife")]
+        [SerializeField, Range(.5f, 3f)] private float knifeRange = 1.85f;
+        [SerializeField, Range(1f, 100f)] private float knifeDamage = 35f;
+        [SerializeField, Range(.3f, 2f)] private float knifeCooldown = .58f;
         [Header("Encounters")]
         [SerializeField] private GameObject scoutPrefab;
         [SerializeField] private GameObject guardPrefab;
@@ -46,6 +50,9 @@ namespace ShiftFour
         [SerializeField] private Transform spawn;
         [SerializeField] private PrototypeMaterials materials;
         [SerializeField, HideInInspector] private Transform generatedContent;
+
+        private OutdoorPlayerEquipment equipment;
+        private WeaponDefinition supplyPistol;
 
         public void Configure(Transform fallback, Transform playerSpawn, PrototypeMaterials palette, GameObject scout = null)
         {
@@ -64,6 +71,17 @@ namespace ShiftFour
 
         private void Awake()
         {
+            supplyPistol = Resources.Load<WeaponDefinition>("Weapons/FNFiveSeven");
+            var player = spawn != null ? spawn.GetComponentInChildren<PlayerController>() : null;
+            if (player != null && player.ViewCamera != null && HasMaterials())
+            {
+                equipment = player.gameObject.AddComponent<OutdoorPlayerEquipment>();
+                equipment.Configure(supplyPistol, knifeRange, knifeDamage, knifeCooldown);
+                equipment.BuildKnife(player.ViewCamera, materials);
+            }
+            if (supplyPistol == null)
+                Debug.LogWarning("Open World supply station: the existing pistol definition is missing.", this);
+
             int startupSeed = randomSeedOnStart ? BitConverter.ToInt32(Guid.NewGuid().ToByteArray(), 0) : seed;
             if (!GenerateLayout(startupSeed, faceScoutAtSpawn: true))
                 BindMissions(FindGeneratedContent() ?? fixedLayout);
@@ -120,8 +138,13 @@ namespace ShiftFour
                 Box("Ground", next, new Vector3(0, -.4f, 0), new Vector3(size, .8f, size), materials.Ground);
                 Vector3[] positions = PlaceBuildings(random, usable, spacing);
                 var reserved = new List<Rect>();
-                ResearchBuildingBuilder.Build(Group("Buildings", next), materials, font, positions);
+                Transform buildings = Group("Buildings", next);
+                ResearchBuildingBuilder.Build(buildings, materials, font, positions);
+                CheckpointAccessDoor.Build(buildings.Find("Checkpoint"), equipment, materials, font);
+                ServerAccessDoor.Build(buildings.Find("Server"), equipment, materials, font);
                 BuildRoads(Group("Roads", next), usable, boundary, positions, reserved);
+                if (!OutdoorSupplyCache.TryBuild(next, entry, boundary, reserved, materials, font, equipment, supplyPistol))
+                    Debug.LogWarning($"Open World supply cache: no clear roadside placement for seed {layoutSeed}.", this);
                 OpenWorldExtractionGate.Build(next, -boundary, materials, font);
                 Transform environment = Group("Environment", next);
                 BuildFence(Group("Fences", environment), boundary);
@@ -341,6 +364,7 @@ namespace ShiftFour
         private void ResetPlayer(Transform layout)
         {
             if (!Application.isPlaying) return;
+            equipment?.ResetForWorld();
             var body = spawn != null ? spawn.GetComponentInChildren<CharacterController>() : null;
             if (body != null)
             {
@@ -365,6 +389,7 @@ namespace ShiftFour
             Transform buildings = layout.Find("Buildings");
             var checkpoint = layout.GetComponentInChildren<CheckpointSecurityScanner>();
             if (layout == fixedLayout && checkpoint != null) checkpoint.ResetMission();
+            equipment?.BindCheckpointMission(layout == fixedLayout ? null : checkpoint);
             var server = layout.GetComponentInChildren<ServerNetworkPuzzle>();
             if (layout == fixedLayout && server != null) server.ResetPuzzle();
             var control = layout.GetComponentInChildren<ControlLockdownMission>();
@@ -379,7 +404,11 @@ namespace ShiftFour
             // The generator's Awake can run before the enabled HUD receives OnEnable.
             bool hasHud = feedback != null && feedback.enabled;
             if (hasHud)
+            {
                 feedback.SetMissions(buildings, checkpoint, server, control, storage, extraction);
+                feedback.SetProgression(layout.GetComponentInChildren<OutdoorSupplyCache>(),
+                    layout.GetComponentInChildren<CheckpointAccessDoor>(), layout.GetComponentInChildren<ServerAccessDoor>());
+            }
             else
                 Debug.LogWarning("Open World missions: no active objective HUD under Spawn.", this);
 

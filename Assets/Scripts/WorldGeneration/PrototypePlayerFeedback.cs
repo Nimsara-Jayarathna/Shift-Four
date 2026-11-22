@@ -17,6 +17,10 @@ namespace ShiftFour
         private ControlLockdownMission control;
         private StoragePowerMission storage;
         private OpenWorldMissionManager extraction;
+        private OutdoorSupplyCache supplyCache;
+        private CheckpointAccessDoor checkpointDoor;
+        private ServerAccessDoor serverDoor;
+        private OutdoorPlayerEquipment equipment;
         private BoxCollider checkpointFloor, serverFloor, controlFloor, storageFloor;
         private GUIStyle titleStyle, objectiveStyle, detailStyle, victoryStyle;
         public OpenWorldMissionManager ExtractionManager => extraction;
@@ -35,10 +39,18 @@ namespace ShiftFour
             storageFloor = FindFloor(buildings, "Storage");
         }
 
+        internal void SetProgression(OutdoorSupplyCache cache, CheckpointAccessDoor door, ServerAccessDoor serverAccess)
+        {
+            supplyCache = cache;
+            checkpointDoor = door;
+            serverDoor = serverAccess;
+        }
+
         private void Start()
         {
             player = GetComponent<PlayerController>();
             health = GetComponent<Health>();
+            equipment = GetComponent<OutdoorPlayerEquipment>();
             GetComponent<GameplayAudio>().Initialize(player, null);
         }
 
@@ -70,9 +82,18 @@ namespace ShiftFour
             var weapon = player.Weapons?.ActiveWeapon;
             if (health != null)
                 GUI.Box(new Rect(16, Screen.height - 44, 132, 28), $"HP {Mathf.CeilToInt(health.Current)} / {Mathf.CeilToInt(health.Maximum)}");
-            if (weapon == null) return;
+            if (weapon == null)
+            {
+                if (equipment != null)
+                {
+                    string knife = equipment.HasSupplies ? "1  Knife    2  Pistol" : "1  Knife";
+                    GUI.Box(new Rect(Screen.width - 166, Screen.height - 44, 150, 28), knife);
+                }
+                return;
+            }
             string ammo = $"{weapon.RoundsInMagazine} / {weapon.ReserveRounds}";
             if (weapon.ReloadState == WeaponReloadState.Reloading) ammo += "  Reloading";
+            else if (equipment != null) ammo = "2  Pistol    " + ammo;
             GUI.Box(new Rect(Screen.width - 166, Screen.height - 44, 150, 28), ammo);
         }
 
@@ -140,7 +161,33 @@ namespace ShiftFour
             if (focus != Mission.Control && control != null && control.isActiveAndEnabled)
                 top = DrawSummary(top, width, scale, "Control", control.Objective, control.IsComplete);
             if (focus != Mission.Storage && storage != null && storage.isActiveAndEnabled)
-                DrawSummary(top, width, scale, "Storage", storage.Objective, storage.IsComplete);
+                top = DrawSummary(top, width, scale, "Storage", storage.Objective, storage.IsComplete);
+
+            if (supplyCache != null && supplyCache.isActiveAndEnabled)
+            {
+                DrawProgression(top, width, scale);
+            }
+        }
+
+        private void DrawProgression(float top, float width, float scale)
+        {
+            bool hasServerKey = equipment != null && equipment.HasServerKey;
+            bool serverOpen = serverDoor != null && serverDoor.IsOpen;
+            bool checkpointOpen = checkpointDoor != null && checkpointDoor.IsOpen;
+            string objective = serverOpen ? "Server Entrance Unlocked" :
+                hasServerKey ? "Reach Server Building" :
+                checkpointOpen ? "Complete Checkpoint Security" : supplyCache.Objective;
+
+            string notice = serverDoor != null ? serverDoor.Notice : string.Empty;
+            if (string.IsNullOrEmpty(notice) && equipment != null) notice = equipment.ServerKeyNotice;
+            if (string.IsNullOrEmpty(notice) && checkpointDoor != null) notice = checkpointDoor.Notice;
+            if (string.IsNullOrEmpty(notice)) notice = supplyCache.Notice;
+
+            if (string.IsNullOrEmpty(notice))
+                DrawSummary(top, width, scale, "Progression", objective, serverOpen, showCompletedObjective: true);
+            else
+                DrawObjective(top, width, scale, "PROGRESSION", objective, string.Empty, notice, serverOpen,
+                    CompleteAccent, notice == "CHECKPOINT KEY REQUIRED" || notice == ServerAccessDoor.KeyRequired);
         }
 
         private void DrawExtractionTracker()
@@ -243,12 +290,13 @@ namespace ShiftFour
             return top + height + 10 * scale;
         }
 
-        private float DrawSummary(float top, float width, float scale, string title, string objective, bool complete)
+        private float DrawSummary(float top, float width, float scale, string title, string objective, bool complete,
+            bool showCompletedObjective = false)
         {
             detailStyle ??= new GUIStyle(GUI.skin.label) { wordWrap = true };
             detailStyle.fontSize = Mathf.RoundToInt(14 * scale);
             detailStyle.normal.textColor = complete ? CompleteAccent : Color.white;
-            string text = $"{title}  ·  {(complete ? "Complete" : objective)}";
+            string text = $"{title}  ·  {(complete && !showCompletedObjective ? "Complete" : objective)}";
             float margin = 16 * scale;
             float textWidth = width - 22 * scale;
             float textHeight = detailStyle.CalcHeight(new GUIContent(text), textWidth);

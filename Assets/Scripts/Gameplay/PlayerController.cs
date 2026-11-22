@@ -20,6 +20,7 @@ namespace ShiftFour
         private float pitch;
         private float verticalSpeed;
         private WeaponController weapons;
+        private OutdoorPlayerEquipment outdoorEquipment;
         private PlayerDeathPresentation deathPresentation;
         private bool suitableGround;
         public string InteractionPrompt { get; private set; } = string.Empty;
@@ -79,7 +80,9 @@ namespace ShiftFour
             ApplyCameraPose();
             weapons = GetComponent<WeaponController>();
             if (weapons == null) weapons = gameObject.AddComponent<WeaponController>();
-            weapons.Initialize(this);
+            outdoorEquipment = GetComponent<OutdoorPlayerEquipment>();
+            weapons.Initialize(this, equipInitialWeapon: outdoorEquipment == null);
+            outdoorEquipment?.Bind(this, weapons);
             deathPresentation = GetComponent<PlayerDeathPresentation>();
             if (deathPresentation == null) deathPresentation = gameObject.AddComponent<PlayerDeathPresentation>();
             deathPresentation.Initialize(this, health);
@@ -137,7 +140,8 @@ namespace ShiftFour
             MovePlayer(move, Time.deltaTime);
 
             UpdateInteraction();
-            if (weapons != null) weapons.ProcessInput();
+            if (outdoorEquipment != null) outdoorEquipment.ProcessInput();
+            else if (weapons != null) weapons.ProcessInput();
         }
 
         private void UpdateInteraction()

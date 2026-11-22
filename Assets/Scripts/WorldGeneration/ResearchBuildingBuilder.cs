@@ -41,8 +41,6 @@ namespace ShiftFour
             Box("Roof cap", root, Vector3.up * (size.y + .25f), new Vector3(size.x + 1, .5f, size.z + 1), m.Metal);
             Box("Identity band", root, new Vector3(0, size.y - 1.5f, front - .12f), new Vector3(size.x + .1f, 2, .18f), m.Metal, false);
             Box("Accent lintel", root, new Vector3(0, size.y - .35f, front - .2f), new Vector3(size.x, .16f, .22f), accent, false);
-            if (type != 0)
-                Label(name.ToUpperInvariant(), root, new Vector3(0, size.y - 1.45f, front - .24f), .48f, font, size.x - 3, 1.8f, m.Lettering);
             Box("Entrance sign", root, new Vector3(0, 4.5f, front - .18f), new Vector3(15, .9f, .18f), m.Metal, false);
             Label(subtitle, root, new Vector3(0, 4.5f, front - .3f), .19f, font, 14, .6f, m.Lettering);
             for (int side = -1; side <= 1; side += 2)
@@ -55,11 +53,13 @@ namespace ShiftFour
                 Box("Road connection", root, new Vector3(0, .035f, front - 5), new Vector3(4, .07f, 10), m.Concrete);
 
             if (type == 0) Checkpoint(root, size, front, accent, m, font);
-            else if (type == 1) Server(root, size, front, accent, m);
+            else if (type == 1) Server(root, size, front, m, font);
             else if (type == 2) Control(root, size, front, accent, m);
-            else Storage(root, size, front, accent, m);
+            else Storage(root, size, front, accent, m, font);
 
             AddWalkableInterior(root, m, font, type);
+            if (type == 2)
+                ControlExteriorBuilder.Build(root, size.x, front, root.Find("Operations roof"), m, font);
         }
 
         public static void AddWalkableInterior(Transform root, PrototypeMaterials m, Font font, int type)
@@ -180,16 +180,19 @@ namespace ShiftFour
             Cylinder("Radio mast", exterior, new Vector3(8, size.y + 3.5f, -5.4f), .38f, 6f, m.Metal, false);
         }
 
-        private static void Server(Transform root, Vector3 size, float front, Material accent, PrototypeMaterials m)
+        private static void Server(Transform root, Vector3 size, float front, PrototypeMaterials m, Font font)
         {
+            // Retain the original rooftop collision and the wall fittings beside the entrance.
             for (int i = -1; i <= 1; i++)
             {
                 Box("Cooling tower", root, new Vector3(i * 6, size.y + 1.8f, 3), new Vector3(4, 3, 9), m.Concrete);
                 Cylinder("Cooling fan", root, new Vector3(i * 6, size.y + 3.4f, 3), 3.2f, .25f, m.Metal, false);
-                Box("Data facade fin", root, new Vector3(i * 6, 8.5f, front - .3f), new Vector3(.45f, 6.5f, .5f), accent, false);
+                Box("Data facade fin", root, new Vector3(i * 6, 8.5f, front - .3f), new Vector3(.45f, 6.5f, .5f), m.Server, false);
             }
             for (int side = -1; side <= 1; side += 2)
                 Box("Server window bank", root, new Vector3(side * 6, 6.5f, front - .2f), new Vector3(7, 1.4f, .16f), m.Glass, false);
+
+            ServerExteriorBuilder.Build(root, size, front, m, font);
         }
 
         private static void Control(Transform root, Vector3 size, float front, Material accent, PrototypeMaterials m)
@@ -202,13 +205,14 @@ namespace ShiftFour
             Box("Mast beacon", root, new Vector3(5, size.y + 11.5f, 3), Vector3.one * .35f, accent, false);
         }
 
-        private static void Storage(Transform root, Vector3 size, float front, Material accent, PrototypeMaterials m)
+        private static void Storage(Transform root, Vector3 size, float front, Material accent, PrototypeMaterials m, Font font)
         {
             for (int i = -2; i <= 2; i++)
             {
                 Box("Roof skylight", root, new Vector3(i * 5, size.y + .6f, 0), new Vector3(2, .4f, 17), m.Glass, false);
             }
             Box("Loading canopy", root, new Vector3(0, 5.6f, front - 2), new Vector3(19, .35f, 4), accent);
+            StorageExteriorBuilder.Build(root, size, front, m, font);
         }
 
     }
