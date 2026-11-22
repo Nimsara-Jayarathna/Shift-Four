@@ -180,6 +180,7 @@ namespace ShiftFour
 
         private void Update()
         {
+            if (owner != null && owner.MenuBlocksInput) return; // Preserve an in-progress reload while the session clock is paused.
             if (!CanOperate && !firing) CancelReload();
             else if (!firing)
             {

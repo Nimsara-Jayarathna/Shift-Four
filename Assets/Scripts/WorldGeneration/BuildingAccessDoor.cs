@@ -101,6 +101,7 @@ namespace ShiftFour
             if (!HasKey) return;
 
             opening = true;
+            equipment.GetComponent<GameplayAudio>()?.PlayOutdoorDoor(transform.position);
             SetIndicators(new Color(.16f, 1f, .36f));
             StartCoroutine(Open());
         }

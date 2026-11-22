@@ -189,7 +189,7 @@ namespace ShiftFour
 
         private void Update()
         {
-            if (!Alive || player == null) return;
+            if (!Alive || player == null || player.MenuBlocksInput) return;
             var session = outdoorPatrol == null ? GameSession.Instance : null;
             if (session != null && !session.CanPlay) return;
             if (playerHealth == null || !playerHealth.IsAlive || (session != null && session.Ended))

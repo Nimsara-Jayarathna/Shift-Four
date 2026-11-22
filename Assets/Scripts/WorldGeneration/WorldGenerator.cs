@@ -133,6 +133,9 @@ namespace ShiftFour
             int startupSeed = randomSeedOnStart ? BitConverter.ToInt32(Guid.NewGuid().ToByteArray(), 0) : seed;
             if (!GenerateLayout(startupSeed, faceScoutAtSpawn: true))
                 BindMissions(FindGeneratedContent() ?? fixedLayout);
+
+            if (gameObject.scene.path == OutdoorMissionMenu.ScenePath && player != null)
+                gameObject.AddComponent<OutdoorMissionMenu>().Initialize(player);
         }
 
         [ContextMenu("Generate World")]
@@ -206,6 +209,8 @@ namespace ShiftFour
                 Scatter(environment, random, usable, density, reserved, trees, layoutSeed);
                 scenery.Build(layoutSeed, size, trees,
                     Mathf.Clamp(grassDensity, 0, 2), sceneryDetail, reserved, materials);
+                if (TryGetComponent(out OutdoorMissionMenu menu) && menu.Preferences?.Applied.Quality == OutdoorSettings.Preset.Low)
+                    scenery.SetReducedGrass(true);
             }
             catch (Exception exception)
             {
@@ -528,6 +533,7 @@ namespace ShiftFour
             if (extraction != null)
                 extraction.BindMissions(checkpoint, server, control, storage, spawn != null ? spawn.GetComponentInChildren<PlayerController>() : null);
 
+            GetComponent<OutdoorMissionMenu>()?.BindExtraction(extraction);
             var feedback = spawn != null ? spawn.GetComponentInChildren<PrototypePlayerFeedback>() : null;
             // The generator's Awake can run before the enabled HUD receives OnEnable.
             bool hasHud = feedback != null && feedback.enabled;

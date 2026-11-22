@@ -26,11 +26,12 @@ namespace ShiftFour
         private OutdoorPlayerEquipment equipment;
         private CombatHud droneBars;
         private BoxCollider checkpointFloor, serverFloor, controlFloor, storageFloor;
-        private GUIStyle titleStyle, objectiveStyle, detailStyle, victoryStyle;
+        private GUIStyle titleStyle, objectiveStyle, detailStyle;
         public OpenWorldMissionManager ExtractionManager => extraction;
 
         internal void SetDroneTargets(DroneBrain[] targets)
         {
+            if (player != null) GetComponent<GameplayAudio>().BindFlightLoops(targets);
             if (droneBars == null && targets.Length > 0) droneBars = gameObject.AddComponent<CombatHud>();
             if (droneBars != null) droneBars.InitializePrototype(GetComponent<PlayerController>(), targets);
         }
@@ -77,12 +78,8 @@ namespace ShiftFour
 
         private void OnGUI()
         {
-            if (Event.current.type != EventType.Repaint || player == null) return;
-            if (extraction != null && extraction.Escaped)
-            {
-                DrawVictory();
-                return;
-            }
+            if (Event.current.type != EventType.Repaint || player == null || player.MenuBlocksInput) return;
+            if (extraction != null && extraction.Escaped) return;
 
             DrawMissions();
             if (extraction != null) DrawExtractionTracker();
@@ -285,26 +282,6 @@ namespace ShiftFour
             detailStyle.fontSize = Mathf.RoundToInt(17 * scale);
             detailStyle.normal.textColor = ready ? CompleteAccent : new Color(1f, .85f, .8f);
             GUI.Label(new Rect(x + inset, y + countersHeight + 7 * scale, textWidth, detailHeight), detail, detailStyle);
-        }
-
-        private void DrawVictory()
-        {
-            Rect screen = new Rect(0, 0, Screen.width, Screen.height);
-            Color previous = GUI.color;
-            GUI.color = new Color(.035f, .065f, .08f, .97f);
-            GUI.DrawTexture(screen, Texture2D.whiteTexture);
-            GUI.color = previous;
-
-            victoryStyle ??= new GUIStyle(GUI.skin.label)
-            {
-                alignment = TextAnchor.MiddleCenter,
-                fontStyle = FontStyle.Bold,
-                wordWrap = true
-            };
-            victoryStyle.fontSize = Mathf.RoundToInt(Mathf.Clamp(Screen.width * .035f, 18f, 60f));
-            victoryStyle.normal.textColor = CompleteAccent;
-            GUI.Label(new Rect(screen.width * .05f, screen.height * .25f, screen.width * .9f, screen.height * .5f),
-                OpenWorldMissionManager.VictoryMessage, victoryStyle);
         }
 
         private float DrawObjective(float top, float width, float scale, string title, string objective, string detail,

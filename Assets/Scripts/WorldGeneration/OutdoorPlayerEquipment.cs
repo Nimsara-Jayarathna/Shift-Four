@@ -177,6 +177,7 @@ namespace ShiftFour
 
         private void LateUpdate()
         {
+            if (player != null && player.MenuBlocksInput) return;
             if (player == null || !player.CanAct)
             {
                 swingStarted = float.NegativeInfinity;

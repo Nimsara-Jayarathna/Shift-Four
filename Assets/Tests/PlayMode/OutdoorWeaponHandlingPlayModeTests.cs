@@ -31,6 +31,7 @@ namespace ShiftFour.Tests
             previousDelta = Time.captureDeltaTime;
             Time.captureDeltaTime = 1f / 60f;
             yield return EditorSceneManager.LoadSceneAsyncInPlayMode(ScenePath, new LoadSceneParameters(LoadSceneMode.Single));
+            yield return OutdoorMissionMenuPlayModeTests.StartMission();
             equipment = (Component)Object.FindFirstObjectByType(RuntimeType("OutdoorPlayerEquipment"));
             mount = equipment.GetComponent(RuntimeType("FirstPersonWeaponMount"));
             weapons = equipment.GetComponent(RuntimeType("WeaponController"));
@@ -126,6 +127,29 @@ namespace ShiftFour.Tests
             yield return new WaitForSeconds(1.6f);
             Assert.That(Read(State, "RoundsInMagazine"), Is.EqualTo(12));
             Assert.That(Read(State, "ReserveRounds"), Is.EqualTo(68));
+        }
+
+        [UnityTest]
+        public IEnumerator LosingFocusPausesAnInProgressReloadUntilResume()
+        {
+            OpenCache();
+            yield return WaitForPistol();
+            Assert.That(Call(weapons, "TryFire"), Is.EqualTo(true));
+            Assert.That(Call(weapons, "RequestReload"), Is.EqualTo(true));
+            var ammo = State;
+            var menu = generator.GetComponent(RuntimeType("OutdoorMissionMenu"));
+            menu.SendMessage("OnApplicationFocus", false);
+            Assert.That(Read(menu, "Screen").ToString(), Is.EqualTo("Paused"));
+            menu.SendMessage("OnApplicationFocus", true);
+            yield return new WaitForSecondsRealtime(.25f);
+            Assert.That(Read(ammo, "ReloadState").ToString(), Is.EqualTo("Reloading"));
+            Assert.That(Read(ammo, "RoundsInMagazine"), Is.EqualTo(11));
+            Assert.That(Call(weapons, "TryFire"), Is.EqualTo(false));
+            Assert.That(Cursor.lockState, Is.EqualTo(CursorLockMode.None));
+            Call(menu, "Play");
+            for (int i = 0; i < 240 && Read(ammo, "ReloadState").ToString() == "Reloading"; i++)
+                yield return null;
+            Assert.That(Read(ammo, "RoundsInMagazine"), Is.EqualTo(12));
         }
 
         [UnityTest]

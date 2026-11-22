@@ -11,6 +11,18 @@ namespace ShiftFour
         public enum Detail { Low, Standard }
         internal static readonly Vector3 BoulderSize = new Vector3(1.6f, 1.9f, 1.4f);
 
+        private readonly List<(Mesh mesh, SubMeshDescriptor full, int reducedCount)> grassMeshes = new();
+        internal void SetReducedGrass(bool reduced)
+        {
+            foreach (var grass in grassMeshes)
+            {
+                var draw = grass.full;
+                if (reduced) draw.indexCount = grass.reducedCount;
+                // Each boundary falls between complete, randomly distributed patches.
+                grass.mesh.SetSubMesh(0, draw, MeshUpdateFlags.DontRecalculateBounds);
+            }
+        }
+
         private readonly List<Mesh> ownedMeshes = new List<Mesh>();
 
         internal static void ApplyLighting(Light sun, float fogDensity)
@@ -135,8 +147,11 @@ namespace ShiftFour
             var grassRandom = new Random(seed ^ 0x3c9820);
             // A bounded number of patches, each with one conservative footprint check for all its blades.
             int attempts = Mathf.RoundToInt(Mathf.Min(size * size * .047f, 3800) * grassDensity);
+            var reducedCounts = new int[meadow.Length];
             for (int i = 0; i < attempts; i++)
             {
+                if (i == attempts / 2)
+                    for (int q = 0; q < meadow.Length; q++) reducedCounts[q] = meadow[q].Triangles.Count;
                 var center = new Vector3(Range(grassRandom, 3 - half, half - 3), 0, Range(grassRandom, 3 - half, half - 3));
                 const float radius = 1.6f;
                 var footprint = new Rect(center.x - radius, center.z - radius, radius * 2, radius * 2);
@@ -170,7 +185,10 @@ namespace ShiftFour
                 }
             }
             for (int i = 0; i < meadow.Length; i++)
-                Publish(meadow[i], material, "Grasses and shrubs " + (i + 1), false);
+            {
+                Mesh mesh = Publish(meadow[i], material, "Grasses and shrubs " + (i + 1), false);
+                if (mesh != null) grassMeshes.Add((mesh, mesh.GetSubMesh(0), reducedCounts[i]));
+            }
             Publish(stones, material, "Boulders and scree");
         }
 
@@ -337,9 +355,9 @@ namespace ShiftFour
             }
         }
 
-        private void Publish(Batch batch, Material material, string label, bool shadows = true)
+        private Mesh Publish(Batch batch, Material material, string label, bool shadows = true)
         {
-            if (batch.Points.Count == 0) return;
+            if (batch.Points.Count == 0) return null;
             var mesh = new Mesh { name = label, indexFormat = batch.Points.Count > 65535 ? IndexFormat.UInt32 : IndexFormat.UInt16 };
             ownedMeshes.Add(mesh);
             mesh.SetVertices(batch.Points);
@@ -352,6 +370,7 @@ namespace ShiftFour
             renderer.sharedMaterial = material;
             renderer.shadowCastingMode = shadows ? ShadowCastingMode.On : ShadowCastingMode.Off;
             batch.Points.Clear(); batch.Colors.Clear(); batch.Triangles.Clear();
+            return mesh;
         }
 
         private void OnDestroy() => ReleaseMeshes();

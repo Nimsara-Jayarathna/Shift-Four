@@ -14,6 +14,8 @@ namespace ShiftFour
         [SerializeField, Range(0f, 1f)] private float droneFlightVolume = .45f;
         [SerializeField, Range(0f, 1f)] private float backgroundMusicVolume = .12f;
         [SerializeField, Range(0f, 1f)] private float reloadVolume = .65f;
+        private float musicGain = 1f, effectsGain = 1f;
+        private readonly float[] voiceLevels = new float[VoiceCapacity];
         private AudioSource backgroundMusic;
         private AudioSource reloadSource;
         private AudioClip reloadClip;
@@ -58,7 +60,7 @@ namespace ShiftFour
                 backgroundMusic.clip = musicClip;
                 backgroundMusic.loop = true; backgroundMusic.playOnAwake = false;
                 backgroundMusic.spatialBlend = 0f; backgroundMusic.dopplerLevel = 0f;
-                backgroundMusic.volume = backgroundMusicVolume;
+                backgroundMusic.volume = backgroundMusicVolume * musicGain;
                 backgroundMusic.priority = 192;
             }
         }
@@ -75,7 +77,7 @@ namespace ShiftFour
                 camera.gameObject.AddComponent<AudioListener>();
             InitializeDedicatedSources();
             if (isActiveAndEnabled) { BindDoors(true); BindWeapon(true); }
-            InitializeFlightLoops();
+            BindFlightLoops(FindObjectsByType<DroneBrain>());
         }
 
         private void InitializeDedicatedSources()
@@ -89,7 +91,7 @@ namespace ShiftFour
                     child.transform.localPosition = Vector3.up * 1.2f;
                     var source = child.AddComponent<AudioSource>();
                     source.clip = doorOpen; source.playOnAwake = false;
-                    source.spatialBlend = 1f; source.volume = doorVolume; source.dopplerLevel = 0f;
+                    source.spatialBlend = 1f; source.volume = doorVolume * effectsGain; source.dopplerLevel = 0f;
                     source.minDistance = 8f; source.maxDistance = 50f;
                     source.rolloffMode = AudioRolloffMode.Linear; source.priority = 32;
                     doorSources.Add(door, source);
@@ -100,7 +102,7 @@ namespace ShiftFour
                 child.transform.SetParent(player.transform, false);
                 reloadSource = child.AddComponent<AudioSource>();
                 reloadSource.clip = reloadClip; reloadSource.playOnAwake = false;
-                reloadSource.spatialBlend = 0f; reloadSource.volume = reloadVolume;
+                reloadSource.spatialBlend = 0f; reloadSource.volume = reloadVolume * effectsGain;
                 reloadSource.dopplerLevel = 0f; reloadSource.priority = 64;
             }
         }
@@ -130,11 +132,10 @@ namespace ShiftFour
             ReloadsPlayed++;
         }
 
-        private void InitializeFlightLoops()
+        internal void BindFlightLoops(DroneBrain[] drones)
         {
             ClearFlightLoops();
             if (droneFlight == null) return;
-            var drones = FindObjectsByType<DroneBrain>();
             flightSources = new AudioSource[drones.Length];
             flightHealth = new Health[drones.Length];
             for (int i = 0; i < drones.Length; i++)
@@ -144,7 +145,7 @@ namespace ShiftFour
                 var source = flightSources[i] = loop.AddComponent<AudioSource>();
                 flightHealth[i] = drones[i].GetComponent<Health>();
                 source.clip = droneFlight; source.loop = true; source.playOnAwake = false;
-                source.spatialBlend = 1f; source.volume = droneFlightVolume; source.dopplerLevel = 0f;
+                source.spatialBlend = 1f; source.volume = droneFlightVolume * effectsGain; source.dopplerLevel = 0f;
                 source.minDistance = 4f; source.maxDistance = 28f;
                 source.rolloffMode = AudioRolloffMode.Logarithmic;
             }
@@ -152,7 +153,7 @@ namespace ShiftFour
 
         private void Update()
         {
-            if (flightSources == null) return;
+            if (flightSources == null || AudioListener.pause) return;
             bool ended = GameSession.Instance != null && GameSession.Instance.Ended;
             for (int i = 0; i < flightSources.Length; i++)
             {
@@ -212,6 +213,31 @@ namespace ShiftFour
             if (!Play(drone ? droneShot : playerShot, noise.Position, drone ? droneShotVolume : playerShotVolume, !local)) return;
             if (drone) DroneShotsPlayed++; else PlayerShotsPlayed++;
         }
+        internal void PreviewSettingsMusic(bool enabled)
+        {
+            if (backgroundMusic != null) backgroundMusic.ignoreListenerPause = enabled;
+        }
+
+        internal void SetCategoryVolumes(float music, float effects)
+        {
+            musicGain = Mathf.Clamp01(music);
+            effectsGain = Mathf.Clamp01(effects);
+            if (backgroundMusic != null) backgroundMusic.volume = backgroundMusicVolume * musicGain;
+            if (reloadSource != null) reloadSource.volume = reloadVolume * effectsGain;
+            foreach (var source in doorSources.Values)
+                if (source != null) source.volume = doorVolume * effectsGain;
+            if (flightSources != null)
+                foreach (var source in flightSources)
+                    if (source != null) source.volume = droneFlightVolume * effectsGain;
+            if (voices != null)
+                for (int i = 0; i < voices.Length; i++) voices[i].volume = voiceLevels[i] * effectsGain;
+        }
+
+        internal void PlayOutdoorDoor(Vector3 position)
+        {
+            if (Play(doorOpen, position, doorVolume, true)) DoorsPlayed++;
+        }
+
         private void OnDoor(LabDoor door)
         {
             if (!doorSources.TryGetValue(door, out var source) || source == null || source.clip == null) return;
@@ -231,7 +257,8 @@ namespace ShiftFour
             }
             var voice = voices[slot]; nextVoice = (slot + 1) % voices.Length;
             voice.Stop(); voice.transform.position = position;
-            voice.clip = clip; voice.volume = volume; voice.pitch = pitch;
+            voiceLevels[slot] = volume;
+            voice.clip = clip; voice.volume = volume * effectsGain; voice.pitch = pitch;
             voice.spatialBlend = spatial ? 1f : 0f; voice.Play();
             return true;
         }

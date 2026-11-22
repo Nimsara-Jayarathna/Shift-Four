@@ -101,7 +101,7 @@ namespace ShiftFour
 
         private void Update()
         {
-            if (!health.IsAlive || Time.time < nextDecision) return;
+            if (player.MenuBlocksInput || !health.IsAlive || Time.time < nextDecision) return;
             nextDecision = Time.time + (source.IsAggressive ? .085f : .14f) + source.PrototypeDecisionOffset * .11f;
             if (!agent.isOnNavMesh)
             {

@@ -1,0 +1,351 @@
+#if UNITY_EDITOR
+using System;
+using System.Collections;
+using System.Linq;
+using NUnit.Framework;
+using UnityEditor.SceneManagement;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+using UnityEngine.TestTools;
+using Object = UnityEngine.Object;
+
+namespace ShiftFour.Tests
+{
+    public sealed class OutdoorMissionMenuPlayModeTests
+    {
+        private const string Path = "Assets/Scenes/OpenWorldPrototype.unity";
+        private static Type T(string name) => Type.GetType("ShiftFour." + name + ", Assembly-CSharp", true);
+        private static Component Single(string type) => Object.FindObjectsByType(T(type), FindObjectsSortMode.None).Cast<Component>().Single();
+        private static Component Menu => Single("OutdoorMissionMenu");
+        private static object Read(object source, string key) => source.GetType().GetProperty(key).GetValue(source);
+        private static void Press(string action) => Menu.GetType().GetMethod(action).Invoke(Menu, null);
+        private static string State => Read(Menu, "Screen").ToString();
+
+        internal static IEnumerator StartMission()
+        {
+            Assert.That(State, Is.EqualTo("Title"));
+            Press("Play");
+            yield return Await(() => State == "Playing");
+        }
+
+        private static IEnumerator Await(Func<bool> condition)
+        {
+            float limit = Time.realtimeSinceStartup + 12f;
+            while (!condition())
+            {
+                Assert.That(Time.realtimeSinceStartup, Is.LessThan(limit), "Menu transition timed out");
+                yield return null;
+            }
+        }
+
+        private float originalScale;
+        private bool originalAudioPause;
+
+        [UnitySetUp]
+        public IEnumerator Load()
+        {
+            originalScale = Time.timeScale;
+            originalAudioPause = AudioListener.pause;
+            Time.timeScale = .75f;
+            yield return EditorSceneManager.LoadSceneAsyncInPlayMode(Path, new LoadSceneParameters(LoadSceneMode.Single));
+            yield return null;
+        }
+
+        [UnityTearDown]
+        public IEnumerator Unload()
+        {
+            Scene current = SceneManager.GetActiveScene();
+            SceneManager.SetActiveScene(SceneManager.CreateScene("After outdoor menu test"));
+            if (current.path == Path) yield return SceneManager.UnloadSceneAsync(current);
+            Time.timeScale = originalScale;
+            AudioListener.pause = originalAudioPause;
+        }
+
+        [UnityTest]
+        public IEnumerator TitlePauseSettingsAndResumePreserveTheLiveSession()
+        {
+            var player = Single("PlayerController");
+            var camera = player.GetComponentInChildren<Camera>();
+            var health = player.GetComponent(T("Health"));
+            Assert.That(State, Is.EqualTo("Title"));
+            Assert.That(camera.transform.position.y - player.transform.position.y, Is.GreaterThan(5f));
+            Assert.That(Read(player, "CanAct"), Is.False);
+            Assert.That(Read(Read(player, "Weapons"), "ActiveWeapon"), Is.Null);
+            Assert.That(Cursor.lockState, Is.EqualTo(CursorLockMode.None));
+            Press("Settings"); Assert.That(State, Is.EqualTo("Settings"));
+            Press("Back"); yield return StartMission();
+            Assert.That(Time.timeScale, Is.EqualTo(.75f));
+            Assert.That(Read(player, "CanAct"), Is.True);
+            Assert.That(Vector3.Distance(camera.transform.position, player.transform.position), Is.LessThan(2f));
+
+            Press("Pause"); Press("Settings");
+            var positions = Object.FindObjectsByType(T("DroneBrain"), FindObjectsSortMode.None).Cast<Component>()
+                .Select(d => (d.transform, d.transform.position)).ToArray();
+            Assert.That(positions.Length, Is.EqualTo(25));
+            var hp = Read(health, "Current");
+            yield return new WaitForSecondsRealtime(.15f);
+            Assert.That(Time.timeScale, Is.Zero);
+            Assert.That(Read(player, "CanAct"), Is.False);
+            Assert.That(Read(health, "Current"), Is.EqualTo(hp));
+            foreach (var (root, position) in positions)
+                Assert.That(Vector3.Distance(root.position, position), Is.LessThan(.02f), root.name);
+            Press("Back"); Assert.That(State, Is.EqualTo("Paused"));
+            Press("Play"); Press("Play"); yield return Await(() => State == "Playing");
+            Assert.That(Time.timeScale, Is.EqualTo(.75f));
+            Assert.That(AudioListener.pause, Is.EqualTo(originalAudioPause));
+            health.GetType().GetMethod("TakeDamage").Invoke(health, new object[] { 100000f });
+            Press("Pause"); Assert.That(State, Is.EqualTo("Dying"));
+        }
+
+        private static void Interact(Component target) => target.GetType().GetMethod("Interact").Invoke(target, null);
+        private static void Damage(Component health) => health.GetType().GetMethod("TakeDamage").Invoke(health, new object[] { 10000f });
+        private const System.Reflection.BindingFlags Internal = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        private static int Subscriptions(Component source, string eventName)
+        {
+            var listeners = (Delegate)source.GetType().GetField(eventName, Internal).GetValue(source);
+            return listeners.GetInvocationList().Count(listener => ReferenceEquals(listener.Target, Menu));
+        }
+
+        private static readonly bool[] RestartChoices = { true, false };
+
+        [UnityTest]
+        public IEnumerator DeathFinishesCameraFallBeforeResults([ValueSource(nameof(RestartChoices))] bool retry)
+        {
+            yield return StartMission();
+            var player = Single("PlayerController");
+            var health = player.GetComponent(T("Health"));
+            var camera = player.GetComponentInChildren<Camera>();
+            Interact(Single("OutdoorSupplyCache"));
+            Vector3 root = player.transform.position;
+            float eyeHeight = camera.transform.position.y;
+            Assert.That(Subscriptions(health, "Died"), Is.EqualTo(1));
+            Damage(health);
+            Assert.That(State, Is.EqualTo("Dying"));
+            Assert.That(Time.timeScale, Is.EqualTo(.75f));
+            Assert.That(Read(player, "CanAct"), Is.False);
+            Damage(health);
+            Press("Pause"); Press("Settings");
+            Assert.That(State, Is.EqualTo("Dying"));
+            yield return Await(() => State == "GameOver");
+            Assert.That(Read(player.GetComponent(T("PlayerDeathPresentation")), "Progress"), Is.EqualTo(1f));
+            Assert.That(camera.transform.position.y, Is.LessThan(eyeHeight - .4f));
+            Assert.That(player.transform.position, Is.EqualTo(root));
+            Assert.That(player.GetComponent<CharacterController>().enabled, Is.True);
+            Damage(health);
+            yield return VerifyResultNavigation("GameOver", retry);
+        }
+
+        [UnityTest]
+        public IEnumerator OnlyRealExtractionYieldsVictory([ValueSource(nameof(RestartChoices))] bool replay)
+        {
+            yield return StartMission();
+            var gate = Single("OpenWorldExtractionGate");
+            var mission = Single("OpenWorldMissionManager");
+            Assert.That(Subscriptions(mission, "Extracted"), Is.EqualTo(1));
+            Interact(gate);
+            Assert.That(State, Is.EqualTo("Playing"));
+            Interact(Single("OutdoorSupplyCache"));
+            Interact(Single("SecurityAccessCard")); Interact(Single("CheckpointSecurityScanner"));
+            var terminals = Object.FindObjectsByType(T("ServerTerminal"), FindObjectsSortMode.None)
+                .Cast<Component>().OrderBy(t => t.name).ToArray();
+            foreach (int i in new[] { 1, 0, 2 }) Interact(terminals[i]);
+            foreach (Component item in Object.FindObjectsByType(T("LockdownSecuritySwitch"), FindObjectsSortMode.None)) Interact(item);
+            Interact(Single("ControlLockdownMission"));
+            foreach (Component item in Object.FindObjectsByType(T("PowerCellPickup"), FindObjectsSortMode.None)) Interact(item);
+            Interact(Single("StoragePowerMission"));
+            Assert.That(Read(mission, "BuildingMissionsCompleted"), Is.EqualTo(4));
+            var world = Single("WorldGenerator").transform.Find("GeneratedWorld");
+            foreach (string path in new[] { "OutdoorScoutPatrols/05 Checkpoint Approach", "Buildings/Server/IndoorGuards/Server Racks",
+                "OutdoorFlankerAmbushes/03 Control to Storage" })
+            {
+                Interact(gate);
+                Assert.That(Read(mission, "Escaped"), Is.False);
+                Damage(world.Find(path).GetComponentInChildren(T("Health")));
+            }
+            Assert.That(Read(mission, "DronesDefeated"), Is.EqualTo(3));
+            Interact(gate); Interact(gate);
+            Assert.That(Read(mission, "Escaped"), Is.True);
+            Assert.That(State, Is.EqualTo("Victory"));
+            Damage(Single("PlayerController").GetComponent(T("Health")));
+            yield return VerifyResultNavigation("Victory", replay);
+        }
+
+        private static IEnumerator VerifyResultNavigation(string result, bool retry)
+        {
+            var previous = Menu;
+            Press("Pause"); Press("Settings"); Press("Back"); Press("Play");
+            Assert.That(State, Is.EqualTo(result));
+            Assert.That(Time.timeScale, Is.Zero);
+            Assert.That(AudioListener.pause, Is.True);
+            Assert.That(Cursor.lockState, Is.EqualTo(CursorLockMode.None));
+            Assert.That(Read(Single("PlayerController"), "CanAct"), Is.False);
+            var prefs = Menu.GetType().GetProperty("Preferences", Internal);
+            object Applied() => prefs.PropertyType.GetProperty("Applied", Internal).GetValue(prefs.GetValue(Menu));
+            object settings = Applied();
+            float volume = AudioListener.volume;
+            string action = retry ? "RestartMission" : "MainMenu";
+            Press(action); Press(action);
+            yield return Await(() => previous == null);
+            yield return null;
+            var player = Single("PlayerController");
+            var health = player.GetComponent(T("Health"));
+            Assert.That(State, Is.EqualTo(retry ? "Playing" : "Title"));
+            Assert.That(Time.timeScale, Is.EqualTo(retry ? .75f : 0f));
+            Assert.That(AudioListener.volume, Is.EqualTo(volume));
+            Assert.That(Applied(), Is.EqualTo(settings));
+            var equipment = player.GetComponent(T("OutdoorPlayerEquipment"));
+            foreach (string key in new[] { "HasCheckpointKey", "HasServerKey", "HasControlKey", "HasStorageKey" })
+                Assert.That(equipment.GetType().GetProperty(key, Internal).GetValue(equipment), Is.False);
+            Assert.That(Subscriptions(health, "Died"), Is.EqualTo(1));
+            Assert.That(Read(player, "CanAct"), Is.EqualTo(retry));
+            Assert.That(Read(health, "Current"), Is.EqualTo(Read(health, "Maximum")));
+            Assert.That(Read(Read(player, "Weapons"), "ActiveWeapon"), Is.Null);
+            Assert.That(Read(Single("OpenWorldMissionManager"), "DronesDefeated"), Is.EqualTo(0));
+            Assert.That(Read(Single("OpenWorldMissionManager"), "BuildingMissionsCompleted"), Is.EqualTo(0));
+            Assert.That(Object.FindObjectsByType(T("DroneBrain"), FindObjectsSortMode.None).Length, Is.EqualTo(25));
+            Assert.That(Object.FindObjectsByType<AudioListener>().Length, Is.EqualTo(1));
+        }
+
+        [UnityTest]
+        public IEnumerator FailedReportKeepsPartialProgressAndExcludesPausedTime()
+        {
+            yield return StartMission();
+            Interact(Single("SecurityAccessCard")); Interact(Single("CheckpointSecurityScanner"));
+            var world = Single("WorldGenerator").transform.Find("GeneratedWorld");
+            Damage(world.Find("OutdoorScoutPatrols/05 Checkpoint Approach").GetComponentInChildren(T("Health")));
+            // Measure the active interval on both sides of a pause longer than the timer's precision.
+            double started = Time.unscaledTimeAsDouble;
+            yield return new WaitForSecondsRealtime(1.1f);
+            Press("Pause"); double paused = Time.unscaledTimeAsDouble;
+            Press("Settings"); yield return new WaitForSecondsRealtime(1.2f);
+            Press("Back"); Press("Play");
+            yield return Await(() => State == "Playing");
+            Damage(Single("PlayerController").GetComponent(T("Health")));
+            yield return Await(() => State == "GameOver");
+            var type = Menu.GetType();
+            Assert.That(type.GetProperty("ActiveTime", Internal).GetValue(Menu), Is.EqualTo($"00:{(int)(paused - started):00}"));
+            Assert.That(type.GetProperty("TargetCount", Internal).GetValue(Menu), Is.EqualTo("1 / 3"));
+            Assert.That(type.GetProperty("BuildingCount", Internal).GetValue(Menu), Is.EqualTo("1 / 4"));
+            Assert.That(type.GetField("BuildingResults", Internal).GetValue(Menu), Is.EqualTo(new[] { "Complete", "Incomplete", "Incomplete", "Incomplete" }));
+        }
+
+        [UnityTest]
+        public IEnumerator AppliedSettingsSurviveReloadAndAffectOnlyPresentation()
+        {
+            const string prefix = "ShiftFour.OpenWorld.Settings.v1.";
+            string[] keys = { "master", "music", "sfx", "sensitivity", "quality" };
+            var originals = keys.ToDictionary(k => k, k => PlayerPrefs.HasKey(prefix + k)
+                ? (float?)(k == "sensitivity" ? PlayerPrefs.GetFloat(prefix + k) : PlayerPrefs.GetInt(prefix + k)) : null);
+            const System.Reflection.BindingFlags members = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+            object Preferences() => Menu.GetType().GetProperty("Preferences", members).GetValue(Menu);
+            void Stage(string name, object value)
+            {
+                var settings = Preferences();
+                var field = settings.GetType().GetField("Draft", members);
+                var draft = field.GetValue(settings);
+                var setting = draft.GetType().GetField(name, members);
+                setting.SetValue(draft, setting.FieldType.IsEnum ? Enum.ToObject(setting.FieldType, value) : value);
+                field.SetValue(settings, draft);
+            }
+            void Apply() => Preferences().GetType().GetMethod("Apply", members).Invoke(Preferences(), null);
+            IEnumerator ReloadScene()
+            {
+                yield return EditorSceneManager.LoadSceneAsyncInPlayMode(Path, new LoadSceneParameters(LoadSceneMode.Single));
+                yield return null;
+            }
+            try
+            {
+                PlayerPrefs.SetFloat(prefix + "sensitivity", float.NaN);
+                PlayerPrefs.SetInt(prefix + "quality", 90);
+                PlayerPrefs.SetInt(prefix + "master", 250);
+                PlayerPrefs.SetInt(prefix + "music", 100);
+                yield return ReloadScene();
+                var player = Single("PlayerController");
+                var sensitivity = player.GetType().GetProperty("MouseSensitivity", members);
+                Assert.That(sensitivity.GetValue(player), Is.EqualTo(2f));
+                Assert.That(AudioListener.volume, Is.EqualTo(1));
+                var world = Single("WorldGenerator").transform.Find("GeneratedWorld");
+                var grass = world.GetComponentsInChildren<MeshFilter>().First(m => m.name.StartsWith("Grasses and shrubs")).sharedMesh;
+                uint full = grass.GetIndexCount(0);
+                var originalPipeline = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
+                var music = player.GetComponentsInChildren<AudioSource>().Single(s => s.name == "Background music");
+                int sourceCount = Object.FindObjectsByType<AudioSource>().Length;
+                Press("Settings");
+                Stage("Music", 0); Press("Back");
+                Assert.That(music.volume, Is.GreaterThan(0f), "Back discards a staged edit.");
+                Press("Settings"); Stage("Quality", 0); Stage("Sensitivity", 4f);
+                Stage("Master", 40); Stage("Music", 0); Stage("Effects", 25);
+                Apply();
+                Assert.That(grass.GetIndexCount(0), Is.InRange(1u, full - 1));
+                Assert.That(sensitivity.GetValue(player), Is.EqualTo(4f));
+                Assert.That(AudioListener.volume, Is.EqualTo(.4f).Within(.001f));
+                Assert.That(music.volume, Is.Zero);
+                Assert.That(player.GetComponentsInChildren<AudioSource>().Single(s => s.name == "Player reload audio").volume,
+                    Is.EqualTo(.65f * .25f).Within(.001f));
+                var loop = world.GetComponentsInChildren<AudioSource>().First(s => s.name == "Drone flight loop");
+                Assert.That(loop.volume, Is.EqualTo(.45f * .25f).Within(.001f));
+                Assert.That(loop.spatialBlend, Is.EqualTo(1f));
+                var runtime = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
+                Assert.That(runtime, Is.Not.SameAs(originalPipeline));
+                Assert.That(Read(runtime, "shadowDistance"), Is.EqualTo(28f));
+                Stage("Quality", 2); Apply();
+                Assert.That(UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline, Is.SameAs(runtime));
+                Assert.That(Read(runtime, "shadowDistance"), Is.EqualTo(75f));
+                Assert.That(grass.GetIndexCount(0), Is.EqualTo(full));
+                Assert.That(world, Is.SameAs(Single("WorldGenerator").transform.Find("GeneratedWorld")));
+                Assert.That(Object.FindObjectsByType<AudioSource>().Length, Is.EqualTo(sourceCount));
+                yield return ReloadScene();
+                Assert.That(sensitivity.GetValue(Single("PlayerController")), Is.EqualTo(4f));
+                Assert.That(AudioListener.volume, Is.EqualTo(.4f).Within(.001f));
+                Press("Settings");
+                var settings = Preferences();
+                settings.GetType().GetField("Draft", members).SetValue(settings,
+                    settings.GetType().GetMethod("Defaults", members).Invoke(settings, null));
+                Apply();
+                Assert.That(sensitivity.GetValue(Single("PlayerController")), Is.EqualTo(2f));
+                Assert.That(UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline, Is.SameAs(originalPipeline));
+                Assert.That(Read(originalPipeline, "shadowDistance"), Is.EqualTo(50f));
+                Assert.That(AudioListener.volume, Is.EqualTo(1));
+            }
+            finally
+            {
+                foreach (string k in keys)
+                {
+                    if (!originals[k].HasValue) PlayerPrefs.DeleteKey(prefix + k);
+                    else if (k == "sensitivity") PlayerPrefs.SetFloat(prefix + k, originals[k].Value);
+                    else PlayerPrefs.SetInt(prefix + k, (int)originals[k].Value);
+                }
+                PlayerPrefs.Save();
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator RestartAndMainMenuLoadFreshSingleWorlds()
+        {
+            yield return StartMission();
+            var player = Single("PlayerController");
+            var cache = Single("OutdoorSupplyCache");
+            cache.GetType().GetMethod("Interact").Invoke(cache, null);
+            Assert.That(Read(Read(player, "Weapons"), "ActiveWeapon"), Is.Not.Null);
+            var previous = Menu;
+            Press("Pause"); Press("RestartMission");
+            yield return Await(() => previous == null);
+            yield return null;
+            Assert.That(State, Is.EqualTo("Playing"));
+            player = Single("PlayerController");
+            Assert.That(Read(Read(player, "Weapons"), "ActiveWeapon"), Is.Null);
+            Assert.That(Read(player.GetComponent(T("Health")), "Current"), Is.EqualTo(Read(player.GetComponent(T("Health")), "Maximum")));
+            Assert.That(Read(Single("OpenWorldMissionManager"), "BuildingMissionsCompleted"), Is.EqualTo(0));
+            previous = Menu;
+            Press("Pause"); Press("MainMenu");
+            yield return Await(() => previous == null);
+            yield return null;
+            Assert.That(State, Is.EqualTo("Title"));
+            Assert.That(Time.timeScale, Is.Zero);
+            Assert.That(Object.FindObjectsByType(T("DroneBrain"), FindObjectsSortMode.None).Length, Is.EqualTo(25));
+            Assert.That(Single("WorldGenerator").transform.Find("GeneratedWorld"), Is.Not.Null);
+            Assert.That(Single("PrototypePlayerFeedback"), Is.Not.Null);
+        }
+    }
+}
+#endif

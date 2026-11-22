@@ -72,6 +72,7 @@ namespace ShiftFour
             noticeUntil = Time.unscaledTime + 3.5f;
             if (equipment == null || !equipment.HasCheckpointKey) return;
             unlocking = true;
+            equipment.GetComponent<GameplayAudio>()?.PlayOutdoorDoor(transform.position);
             SetIndicator(new Color(.16f, 1f, .36f));
             StartCoroutine(Open());
         }

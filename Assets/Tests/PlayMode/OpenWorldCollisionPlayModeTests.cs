@@ -27,6 +27,7 @@ namespace ShiftFour.Tests
         public IEnumerator Load()
         {
             yield return EditorSceneManager.LoadSceneAsyncInPlayMode(ScenePath, new LoadSceneParameters(LoadSceneMode.Single));
+            yield return OutdoorMissionMenuPlayModeTests.StartMission();
             generator = Find("WorldGenerator").Single();
             player = Find("PlayerController").Single();
             capsule = player.GetComponent<CharacterController>();

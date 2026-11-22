@@ -215,7 +215,7 @@ namespace ShiftFour
         {
             if (prototype)
             {
-                if (CanShowCombat && VisibleDroneBarCount > 0 && Event.current.type == EventType.Repaint)
+                if (player != null && !player.MenuBlocksInput && CanShowCombat && VisibleDroneBarCount > 0 && Event.current.type == EventType.Repaint)
                     presentation.DrawPrototypeBars(drones);
                 return;
             }
