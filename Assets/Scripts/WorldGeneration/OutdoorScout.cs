@@ -9,18 +9,18 @@ namespace ShiftFour
     [DefaultExecutionOrder(210)]
     public sealed class OutdoorScout : MonoBehaviour
     {
-        public enum Activity { Patrol, Chase, Attack, ReturnToPatrol, Destroyed }
+        public enum Activity { Patrol, Alert, Chase, Attack, Investigate, ReturnToPatrol, Destroyed }
 
         private const float AttackRange = 8f;
-        private const float ShotInterval = 1.05f;
-        private const float SearchTime = 2.5f;
+        private const float ShotInterval = 2.15f;
+        private const float AlertWindup = .65f;
         private const float FacingTolerance = 12f;
         private ScoutBrain source;
         private PlayerController player;
         private Vector3[] patrol;
         private Transform marker;
-        private Vector3 patrolCenter;
-        private float detectionRange, leash;
+        private OutdoorScoutEncounter encounter;
+        private float detectionRange, viewCosine, leash, searchTime;
         private NavMeshAgent agent;
         private NavMeshPath route;
         private DroneMotor motor;
@@ -28,27 +28,39 @@ namespace ShiftFour
         private DroneWeaponMount weapon;
         private DroneWeaponEffects effects;
         private Health health, playerHealth;
-        private Vector3 lastSeen, destination;
+        private Vector3 lastSeen, destination, contactOrigin;
         private Vector3? aimPoint;
         private bool hasDestination;
         private bool warnedAboutNavigation;
-        private bool seesPlayer, reportedSight, reportedCover, reportedDamage;
-        private float nextDecision, nextShot, lastSeenAt = float.NegativeInfinity;
+        private bool engaged, reportedCover, reportedDamage;
+        private float nextDecision, nextShot, lastSeenAt = float.NegativeInfinity, attackAllowedAt;
+        private float nextRouteAttempt;
+        private Renderer statusStripe;
+        private MaterialPropertyBlock statusTint;
+        private static readonly int TintColor = Shader.PropertyToID("_BaseColor");
+        private static readonly Color AlertColor = new Color(1f, .37f, .07f);
         private int post = 1;
 
         public Activity State { get; private set; }
         public int PatrolPost => post + 1;
 
+        internal Transform Marker => marker;
+
         internal void Configure(ScoutBrain prefabBrain, PlayerController target, Vector3[] posts,
-            Vector3 center, float range, float limit, Transform nameplate)
+            OutdoorScoutEncounter owner, float range, float fieldOfView, float limit, float searchDuration,
+            Transform nameplate, Renderer stripe)
         {
             source = prefabBrain;
             player = target;
             patrol = posts;
-            patrolCenter = center;
+            encounter = owner;
             detectionRange = range;
+            viewCosine = Mathf.Cos(fieldOfView * .5f * Mathf.Deg2Rad);
             leash = limit;
+            searchTime = searchDuration;
             marker = nameplate;
+            statusStripe = stripe;
+            statusTint = new MaterialPropertyBlock();
         }
 
         private void Start()
@@ -71,7 +83,7 @@ namespace ShiftFour
             route = new NavMeshPath();
             if (weapon == null || effects == null)
                 Debug.LogWarning("Outdoor Scout: the prefab weapon mount or shot effects are missing.", this);
-            source.Configure("Outdoor Scout", patrol[0]);
+            source.Configure(name, patrol[0]);
             source.InitializeDifficulty();
             if (source.DifficultyProfile != null) motor.InitializeMovement(source.DifficultySettings);
             health.Died += OnDied;
@@ -88,49 +100,58 @@ namespace ShiftFour
                 WarnNavigation("lost its NavMesh binding");
                 return;
             }
-            Vector3 origin = transform.TransformPoint(body.EnvelopeCenter);
-            Vector3 offset = player != null ? player.transform.position - patrolCenter : Vector3.zero;
-            offset.y = 0f;
-            bool hasTarget = player != null && player.isActiveAndEnabled && playerHealth != null && playerHealth.IsAlive
-                && offset.sqrMagnitude <= leash * leash;
-            float distance = hasTarget ? Vector3.Distance(origin, player.EyePosition) : float.PositiveInfinity;
-            bool inRange = distance <= detectionRange;
-            RaycastHit sightHit = default;
-            bool visible = inRange && PlayerHit(origin, out sightHit);
-            if (inRange && !visible && !reportedSight)
-                Debug.Log(sightHit.collider != null ? $"Outdoor Scout sight blocked by {sightHit.collider.name}." :
-                    "Outdoor Scout: no player hitbox on the sight ray.", this);
-            reportedSight = inRange && !visible;
+            Vector3 origin = transform.position + body.EnvelopeCenter;
+            Vector3 target = player.transform.position;
+            bool canPursue = player.isActiveAndEnabled && playerHealth.IsAlive && encounter.AllowsTarget(target) &&
+                (!engaged || WithinLeash(target));
+            float distance = Vector3.Distance(origin, player.EyePosition);
+            Vector3 heading = HeadingToPlayer();
+            bool inView = heading.sqrMagnitude < .01f || Vector3.Dot(transform.forward, heading.normalized) >= viewCosine;
+            bool visible = canPursue && distance <= detectionRange && inView && PlayerHit(origin, out _);
             if (visible)
             {
-                if (!seesPlayer)
-                    Debug.Log($"Outdoor Scout detected {player.name} at {distance:0.0} m.", this);
-                lastSeen = player.transform.position;
+                if (!engaged)
+                {
+                    engaged = true;
+                    contactOrigin = transform.position;
+                    attackAllowedAt = Time.time + AlertWindup;
+                    SetAlertStripe(true);
+                    encounter.PublishAlert(this, target);
+                    Debug.Log($"{name} detected {player.name} at {distance:0.0} m.", this);
+                }
+                lastSeen = target;
                 lastSeenAt = Time.time;
                 aimPoint = player.EyePosition;
-                seesPlayer = true;
+                if (Time.time < attackAllowedAt)
+                {
+                    State = Activity.Alert;
+                    Hold();
+                    return;
+                }
                 if (distance <= AttackRange && TryAttack()) return;
-            }
-            else
-            {
-                aimPoint = null;
-                seesPlayer = false;
-            }
-
-            if (hasTarget && Time.time - lastSeenAt <= SearchTime)
-            {
                 State = Activity.Chase;
                 motor.SetMovementMode(DroneMovementMode.Chase);
                 Travel(lastSeen);
                 return;
             }
-            if (State == Activity.Chase || State == Activity.Attack)
+
+            aimPoint = null;
+            if (engaged && playerHealth.IsAlive && Time.time - lastSeenAt <= searchTime)
             {
+                State = Activity.Investigate;
+                motor.SetMovementMode(DroneMovementMode.Investigate);
+                Travel(lastSeen);
+                return;
+            }
+            if (engaged)
+            {
+                engaged = false;
                 State = Activity.ReturnToPatrol;
                 reportedCover = reportedDamage = false;
                 post = ClosestPost();
-                Debug.Log("Outdoor Scout lost the player and is returning to patrol.", this);
+                SetAlertStripe(false);
             }
+
             motor.SetMovementMode(DroneMovementMode.Patrol);
             if (Vector3.Distance(transform.position, patrol[post]) <= agent.stoppingDistance + .35f)
             {
@@ -138,6 +159,17 @@ namespace ShiftFour
                 post = (post + 1) % patrol.Length;
             }
             Travel(patrol[post]);
+        }
+
+        private bool WithinLeash(Vector3 point)
+            => OutdoorScoutEncounter.FlatDistanceSquared(point, contactOrigin) <= leash * leash;
+
+        private void SetAlertStripe(bool alert)
+        {
+            if (statusStripe == null) return;
+            statusTint.Clear();
+            if (alert) statusTint.SetColor(TintColor, AlertColor);
+            statusStripe.SetPropertyBlock(alert ? statusTint : null);
         }
 
         private bool TryAttack()
@@ -167,9 +199,9 @@ namespace ShiftFour
 
             State = Activity.Attack;
             Hold();
-            if (Time.time < nextShot) return true;
+            if (Time.time < nextShot || !encounter.TryClaimShot()) return true;
             nextShot = Time.time + ShotInterval;
-            float damage = source.ShotDamage;
+            float damage = source.ShotDamage * .55f;
             float before = playerHealth.Current;
             if (float.IsFinite(damage) && damage > 0f)
             {
@@ -191,7 +223,7 @@ namespace ShiftFour
         private void LateUpdate()
         {
             if (health == null || !health.IsAlive) return;
-            if (State == Activity.Attack && aimPoint.HasValue && player != null)
+            if ((State == Activity.Alert || State == Activity.Attack || State == Activity.Chase) && aimPoint.HasValue)
             {
                 Vector3 heading = HeadingToPlayer();
                 if (heading.sqrMagnitude > .01f)
@@ -246,19 +278,29 @@ namespace ShiftFour
 
         private void Travel(Vector3 target)
         {
-            if (hasDestination && (target - destination).sqrMagnitude < .36f && agent.hasPath) return;
+            if (hasDestination && (target - destination).sqrMagnitude < .36f &&
+                (agent.hasPath || Vector3.Distance(transform.position, target) < agent.stoppingDistance + .3f)) return;
+            if (Time.time < nextRouteAttempt) return;
+            nextRouteAttempt = Time.time + .35f;
             if (!NavMesh.SamplePosition(target, out NavMeshHit hit, 1.25f, agent.areaMask) ||
-                !agent.CalculatePath(hit.position, route) || route.status != NavMeshPathStatus.PathComplete)
+                !agent.CalculatePath(hit.position, route) || route.status != NavMeshPathStatus.PathComplete || !RouteAllowed())
             {
                 Hold();
-                if (State != Activity.Chase) WarnNavigation($"cannot reach patrol post {PatrolPost} at {target}");
+                if (!engaged) WarnNavigation($"cannot reach patrol post {PatrolPost} at {target}");
                 return;
             }
             destination = target;
             hasDestination = agent.SetPath(route);
             agent.isStopped = !hasDestination;
             if (hasDestination) warnedAboutNavigation = false;
-            else if (State != Activity.Chase) WarnNavigation($"could not follow the path to patrol post {PatrolPost}");
+            else if (!engaged) WarnNavigation($"could not follow the path to patrol post {PatrolPost}");
+        }
+
+        private bool RouteAllowed()
+        {
+            foreach (Vector3 point in route.corners)
+                if (!encounter.InsidePerimeter(point) || (engaged && !WithinLeash(point))) return false;
+            return true;
         }
 
         private void WarnNavigation(string problem)
@@ -286,6 +328,8 @@ namespace ShiftFour
         private void OnDied(Health _)
         {
             State = Activity.Destroyed;
+            engaged = false;
+            aimPoint = null;
             if (marker != null) marker.gameObject.SetActive(false);
             motor.Stop();
             agent.enabled = false;

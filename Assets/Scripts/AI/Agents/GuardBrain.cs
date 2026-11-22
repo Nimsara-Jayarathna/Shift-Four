@@ -29,6 +29,23 @@ namespace ShiftFour
         private Vector3 committedCover;
         private float coverCommittedAt;
         private DroneMovementMode decisionMode;
+        private IndoorGuardZone indoorZone;
+        private int indoorSlot;
+        private NavMeshQueryFilter indoorFilter;
+        private float nextApproach;
+        private float aimReadyAt;
+        private bool aiming;
+        private Vector3 indoorGoal, indoorThreat;
+        private static readonly float[] ApproachAngles = { 0f, 36f, -36f, 72f, -72f };
+        private static readonly float[] ApproachDistances = { 4.8f, 8f };
+
+        protected override string GeneratedPatrolLabel => indoorZone == null ? base.GeneratedPatrolLabel : "Patrol indoor post ";
+        protected override float VisionDistance => indoorZone?.Detection ?? base.VisionDistance;
+        protected override float AttackRange => indoorZone?.Attack ?? base.AttackRange;
+        protected override float ShotInterval => indoorZone?.Cooldown ?? base.ShotInterval;
+        protected override bool CanTarget(Vector3 position) => indoorZone == null || indoorZone.CanTrack(position);
+        protected override bool TryAuthorizeShot() => indoorZone == null ||
+            (Time.time >= aimReadyAt && indoorZone.TryClaimShot(indoorSlot));
 
         private void Awake()
         {
@@ -51,8 +68,28 @@ namespace ShiftFour
         public void SetCover(Vector3 first, Vector3 second)
         { coverPoints = new[] { first, second }; haveCover = false; }
 
+        internal void ConfigureZone(IndoorGuardZone zone, int slot)
+        {
+            indoorZone = zone;
+            indoorSlot = slot;
+            var template = GetComponent<NavMeshAgent>();
+            indoorFilter = new NavMeshQueryFilter { agentTypeID = template.agentTypeID, areaMask = template.areaMask };
+        }
+
+        protected override bool ShouldResumePatrol(Vector3 targetPosition)
+        {
+            if (indoorZone == null) return base.ShouldResumePatrol(targetPosition);
+            aiming = false;
+            if ((indoorZone.CanTrack(targetPosition) && TryGetIndoorThreat(out _)) || indoorZone.TryGetScoutAlert(out _))
+                return false;
+            indoorZone.ReleaseApproach(indoorSlot);
+            nextApproach = 0f;
+            return true;
+        }
+
         protected override DecisionOption Decide(bool visible, Vector3 playerPosition, float distance)
         {
+            if (indoorZone != null) return DecideIndoors(visible, playerPosition, distance);
             decisionMode = DroneMovementMode.Patrol;
             if (!Alive || Awareness == null || !Awareness.IsEnabled) return Post();
             if (Awareness.State == DroneAwarenessState.ReturnToPost ||
@@ -102,6 +139,72 @@ namespace ShiftFour
                     "Investigate server disturbance", disturbance, 35f);
             }
             return Post();
+        }
+
+        private DecisionOption DecideIndoors(bool visible, Vector3 playerPosition, float distance)
+        {
+            Vector3 threat = playerPosition;
+            if (visible)
+            {
+                indoorZone.ShareSighting(threat);
+                if (!aiming) aimReadyAt = Time.time + .45f;
+                aiming = true;
+            }
+            else if (!(indoorZone.CanTrack(playerPosition) && TryGetIndoorThreat(out threat)) &&
+                !indoorZone.TryGetScoutAlert(out threat))
+            {
+                decisionMode = DroneMovementMode.Patrol;
+                return Option("Return to assigned patrol", Home, 10f);
+            }
+
+            decisionMode = visible ? DroneMovementMode.Chase : DroneMovementMode.Investigate;
+            if (visible && distance >= 3.5f && distance <= AttackRange - 1f)
+            {
+                nextApproach = 0f;
+                indoorZone.ReleaseApproach(indoorSlot);
+                return Option("Hold and engage visible player", transform.position, 75f);
+            }
+
+            if (Time.time >= nextApproach || (indoorThreat - threat).sqrMagnitude > 2.5f * 2.5f)
+            {
+                nextApproach = Time.time + .4f;
+                indoorThreat = threat;
+                indoorGoal = FindIndoorApproach(threat);
+            }
+            return Option(visible ? "Pursue within security zone" : "Investigate disturbance in security zone",
+                indoorGoal, 65f);
+        }
+
+        private bool TryGetIndoorThreat(out Vector3 point)
+        {
+            if (indoorZone.TryGetSighting(out point) || Awareness.TryGetLastSeen(Time.time, out point))
+                return indoorZone.CanTrack(point);
+            if (Awareness.TryGetLastHeard(Time.time, out SoundObservation sound) &&
+                sound.Category == NoiseCategory.Gunshot && sound.Strength >= minimumDisturbanceStrength &&
+                indoorZone.CanTrack(sound.Position))
+            {
+                point = sound.Position;
+                return true;
+            }
+            return false;
+        }
+
+        private Vector3 FindIndoorApproach(Vector3 threat)
+        {
+            Vector3 direction = Vector3.ProjectOnPlane(Home - threat, Vector3.up);
+            if (direction.sqrMagnitude < .01f) direction = -transform.forward;
+            foreach (float radius in ApproachDistances)
+            foreach (float angle in ApproachAngles)
+            {
+                Vector3 point = threat + Quaternion.Euler(0f, angle, 0f) * direction.normalized * radius;
+                point.y = Home.y;
+                if (!NavMesh.SamplePosition(point, out NavMeshHit hit, .65f, indoorFilter) ||
+                    !body.CanOccupy(hit.position) || !Reachable(hit.position) ||
+                    !indoorZone.TryClaimApproach(indoorSlot, hit.position)) continue;
+                return hit.position;
+            }
+            indoorZone.ReleaseApproach(indoorSlot);
+            return transform.position;
         }
 
         // Guard destinations already include spacing and defensive route validation. The shared

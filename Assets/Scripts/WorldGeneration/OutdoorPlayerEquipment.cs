@@ -7,15 +7,23 @@ namespace ShiftFour
     {
         private PlayerController player;
         private CheckpointSecurityScanner checkpointMission;
+        private ServerNetworkPuzzle serverMission;
+        private ControlLockdownMission controlMission;
         private WeaponController weapons;
         private OutdoorKnifeViewmodel knife;
         private float range, damage, cooldown, nextSlash, swingStarted;
+        private float serverKeyNoticeUntil, controlKeyNoticeUntil, storageKeyNoticeUntil;
         internal bool HasSupplies { get; private set; }
         internal bool HasCheckpointKey => HasSupplies;
-        // The active scanner is the source of truth, so there is no key pickup or extra completion flag.
-        internal bool HasServerKey => checkpointMission != null && checkpointMission.isActiveAndEnabled && checkpointMission.IsComplete;
-        internal string ServerKeyNotice => HasServerKey && Time.unscaledTime < checkpointMission.CompletedAt + 4f
+        internal bool HasServerKey { get; private set; }
+        internal string ServerKeyNotice => HasServerKey && Time.unscaledTime < serverKeyNoticeUntil
             ? "SERVER ACCESS KEY ACQUIRED" : string.Empty;
+        internal bool HasControlKey { get; private set; }
+        internal string ControlKeyNotice => HasControlKey && Time.unscaledTime < controlKeyNoticeUntil
+            ? "CONTROL ACCESS KEY ACQUIRED" : string.Empty;
+        internal bool HasStorageKey { get; private set; }
+        internal string StorageKeyNotice => HasStorageKey && Time.unscaledTime < storageKeyNoticeUntil
+            ? "STORAGE ACCESS KEY ACQUIRED" : string.Empty;
         internal WeaponDefinition Pistol { get; private set; }
         internal bool KnifeSelected => weapons != null && weapons.ActiveWeapon == null;
 
@@ -38,12 +46,68 @@ namespace ShiftFour
             knife = OutdoorKnifeViewmodel.Build(view, materials);
         }
 
-        internal void BindCheckpointMission(CheckpointSecurityScanner mission) => checkpointMission = mission;
+        internal void BindCheckpointMission(CheckpointSecurityScanner mission)
+        {
+            if (ReferenceEquals(checkpointMission, mission)) return;
+            if (checkpointMission != null) checkpointMission.Completed -= AwardServerKey;
+            checkpointMission = mission;
+            if (checkpointMission != null) checkpointMission.Completed += AwardServerKey;
+        }
+
+        private void AwardServerKey(CheckpointSecurityScanner scanner)
+        {
+            if (scanner != checkpointMission || !scanner.IsComplete || HasServerKey) return;
+            HasServerKey = true;
+            serverKeyNoticeUntil = Time.unscaledTime + 4f;
+        }
+
+        internal void BindServerMission(ServerNetworkPuzzle mission)
+        {
+            if (ReferenceEquals(serverMission, mission)) return;
+            if (serverMission != null) serverMission.Completed -= AwardControlKey;
+            serverMission = mission;
+            if (serverMission != null) serverMission.Completed += AwardControlKey;
+        }
+
+        private void AwardControlKey(ServerNetworkPuzzle puzzle)
+        {
+            if (puzzle != serverMission || !puzzle.IsComplete || HasControlKey) return;
+            HasControlKey = true;
+            controlKeyNoticeUntil = Time.unscaledTime + 4f;
+        }
+
+        internal void BindControlMission(ControlLockdownMission mission)
+        {
+            if (ReferenceEquals(controlMission, mission)) return;
+            if (controlMission != null) controlMission.Completed -= AwardStorageKey;
+            controlMission = mission;
+            if (controlMission != null) controlMission.Completed += AwardStorageKey;
+        }
+
+        private void AwardStorageKey(ControlLockdownMission lockdown)
+        {
+            if (lockdown != controlMission || !lockdown.IsComplete || HasStorageKey) return;
+            HasStorageKey = true;
+            storageKeyNoticeUntil = Time.unscaledTime + 4f;
+        }
+
+        private void OnDestroy()
+        {
+            BindCheckpointMission(null);
+            BindServerMission(null);
+            BindControlMission(null);
+        }
 
         internal void ResetForWorld()
         {
             HasSupplies = false;
-            checkpointMission = null;
+            HasServerKey = false;
+            HasControlKey = false;
+            HasStorageKey = false;
+            serverKeyNoticeUntil = controlKeyNoticeUntil = storageKeyNoticeUntil = 0f;
+            BindCheckpointMission(null);
+            BindServerMission(null);
+            BindControlMission(null);
             nextSlash = 0f;
             swingStarted = float.NegativeInfinity;
             if (weapons != null) weapons.ClearLoadout();

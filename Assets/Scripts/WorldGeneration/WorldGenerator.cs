@@ -46,10 +46,30 @@ namespace ShiftFour
         [SerializeField] private GameObject interceptorPrefab;
         [SerializeField] private GameObject flankerPrefab;
         [SerializeField, Range(6f, 40f)] private float scoutDetectionRange = 24f;
+        [SerializeField, Range(1.7f, 3.5f)] private float scoutFlightHeight = 2.1f;
+        [SerializeField, Range(40f, 170f)] private float scoutFieldOfView = 115f;
+        [SerializeField, Range(8f, 35f)] private float scoutPursuitDistance = 22f;
+        [SerializeField, Range(.5f, 10f)] private float scoutSearchDuration = 3.5f;
+        [SerializeField, Range(.5f, 1.5f), Tooltip("Scales detection range for all four indoor Guard zones.")]
+        private float guardDetectionScale = 1f;
         [SerializeField] private Transform fixedLayout;
         [SerializeField] private Transform spawn;
         [SerializeField] private PrototypeMaterials materials;
         [SerializeField, HideInInspector] private Transform generatedContent;
+
+        [Header("Outdoor Flanker ambushes")]
+        [SerializeField, Range(8f, 40f)] private float flankerDetectionRange = 28f;
+        [SerializeField, Range(2f, 25f)] private float flankerDamage = 9f;
+        [SerializeField, Range(.25f, 1.2f)] private float flankerShotInterval = .42f;
+        [SerializeField, Range(1.6f, 8f)] private float flankerRecoveryCooldown = 3.6f;
+        [SerializeField, Range(12f, 35f)] private float flankerAmbushRadius = 23f;
+        [SerializeField, Range(18f, 45f)] private float flankerPursuitLimit = 33f;
+        [SerializeField, Range(5f, 15f)] private float flankerAttackDistance = 9f;
+
+        [Header("Outdoor Interceptor response")]
+        [SerializeField, Range(2f, 30f)] private float interceptorResponseCooldown = 8f;
+        [SerializeField, Range(8f, 45f)] private float interceptorPursuitTime = 28f;
+        [SerializeField, Range(25f, 180f)] private float interceptorPursuitDistance = 110f;
 
         private OutdoorPlayerEquipment equipment;
         private WeaponDefinition supplyPistol;
@@ -141,7 +161,9 @@ namespace ShiftFour
                 Transform buildings = Group("Buildings", next);
                 ResearchBuildingBuilder.Build(buildings, materials, font, positions);
                 CheckpointAccessDoor.Build(buildings.Find("Checkpoint"), equipment, materials, font);
-                ServerAccessDoor.Build(buildings.Find("Server"), equipment, materials, font);
+                BuildingAccessDoor.Build(buildings.Find("Server"), BuildingAccessDoor.Site.Server, equipment, materials, font);
+                BuildingAccessDoor.Build(buildings.Find("Control"), BuildingAccessDoor.Site.Control, equipment, materials, font);
+                BuildingAccessDoor.Build(buildings.Find("Storage"), BuildingAccessDoor.Site.Storage, equipment, materials, font);
                 BuildRoads(Group("Roads", next), usable, boundary, positions, reserved);
                 if (!OutdoorSupplyCache.TryBuild(next, entry, boundary, reserved, materials, font, equipment, supplyPistol))
                     Debug.LogWarning($"Open World supply cache: no clear roadside placement for seed {layoutSeed}.", this);
@@ -178,26 +200,45 @@ namespace ShiftFour
             if (Application.isPlaying)
             {
                 var player = spawn.GetComponentInChildren<PlayerController>();
-                Transform marker = OutdoorScoutEncounter.Spawn(next, scoutPrefab, player,
-                    scoutDetectionRange, materials, font, layoutSeed, out bool navigationReady,
+                var ambushes = flankerPrefab != null
+                    ? OutdoorFlankerAmbushes.Prepare(next, spawn.position, boundary, materials, layoutSeed) : null;
+                var patrols = OutdoorScoutEncounter.Build(next, scoutPrefab, spawn.position, boundary, layoutSeed,
                     guardPrefab, interceptorPrefab, flankerPrefab);
-                if (navigationReady)
+                OutdoorScout extractionScout = patrols != null ? patrols.Deploy(scoutPrefab, player, layoutSeed,
+                    EncounterSetting(scoutFlightHeight, 2.1f, 1.7f, 3.5f), EncounterSetting(scoutDetectionRange, 24f, 6f, 40f),
+                    EncounterSetting(scoutFieldOfView, 115f, 40f, 170f), EncounterSetting(scoutPursuitDistance, 22f, 8f, 35f),
+                    EncounterSetting(scoutSearchDuration, 3.5f, .5f, 10f), materials, font) : null;
+                FlankerBrain extractionFlanker = null;
+                if (patrols != null && ambushes != null)
                 {
-                    OutdoorDroneEncounter.Spawn<GuardBrain>(next, guardPrefab, player, "Server", 1,
-                        "Guard", materials.Server, materials, font, layoutSeed);
-                    OutdoorDroneEncounter.Spawn<InterceptorBrain>(next, interceptorPrefab, player, "Control", 2,
-                        "Interceptor", materials.Control, materials, font, layoutSeed);
-                    OutdoorDroneEncounter.Spawn<FlankerBrain>(next, flankerPrefab, player, "Storage", 3,
-                        "Flanker", materials.Storage, materials, font, layoutSeed);
+                    float radius = EncounterSetting(flankerAmbushRadius, 23f, 12f, 35f);
+                    var settings = new FlankerAmbushSettings(EncounterSetting(flankerDetectionRange, 28f, 8f, 40f),
+                        EncounterSetting(flankerDamage, 9f, 2f, 25f), EncounterSetting(flankerShotInterval, .42f, .25f, 1.2f),
+                        EncounterSetting(flankerRecoveryCooldown, 3.6f, 1.6f, 8f), radius,
+                        EncounterSetting(flankerPursuitLimit, 33f, radius + 2f, 45f),
+                        EncounterSetting(flankerAttackDistance, 9f, 5f, 15f));
+                    extractionFlanker = ambushes.Deploy(flankerPrefab, player, patrols, settings, materials, font, layoutSeed);
                 }
+                var interceptors = patrols != null ? OutdoorInterceptorDispatch.Deploy(next, patrols, interceptorPrefab,
+                    player, boundary, EncounterSetting(interceptorResponseCooldown, 8f, 2f, 30f),
+                    EncounterSetting(interceptorPursuitTime, 28f, 8f, 45f),
+                    EncounterSetting(interceptorPursuitDistance, 110f, 25f, 180f), materials, font, layoutSeed) : null;
+                player?.GetComponent<PrototypePlayerFeedback>()?.SetOutdoorEncounters(patrols, ambushes, interceptors);
+                float detectionScale = float.IsNaN(guardDetectionScale) ? 1f : Mathf.Clamp(guardDetectionScale, .5f, 1.5f);
+                GuardBrain extractionGuard = IndoorGuardZone.Deploy(next, guardPrefab, player,
+                    detectionScale, materials, font, layoutSeed);
+                if (patrols != null)
+                    foreach (var zone in next.GetComponentsInChildren<IndoorGuardZone>())
+                        zone.ListenForScoutAlerts(patrols);
                 var extractionGate = next.GetComponentInChildren<OpenWorldExtractionGate>();
                 if (extractionGate != null)
                     Debug.Log($"Open World extraction: spawned {extractionGate.name} at {extractionGate.transform.position} on seed {layoutSeed}, behind Spawn at the south end of the avenue.", extractionGate);
                 else
                     Debug.LogWarning($"Open World extraction: the generated gate is missing on seed {layoutSeed}.", next);
                 var extraction = next.GetComponentInChildren<OpenWorldMissionManager>();
-                if (extraction != null) extraction.BindDrones(next);
+                if (extraction != null) extraction.BindDrones(next, extractionGuard, extractionScout, extractionFlanker);
                 else Debug.LogWarning($"Open World extraction: no active mission manager on seed {layoutSeed}.", next);
+                Transform marker = extractionScout != null ? extractionScout.Marker : null;
                 if (faceScoutAtSpawn && marker != null &&
                     !Physics.Linecast(player.EyePosition, marker.position, WeaponController.GameplayRaycastMask,
                         QueryTriggerInteraction.Ignore))
@@ -208,6 +249,9 @@ namespace ShiftFour
             }
             return true;
         }
+
+        private static float EncounterSetting(float value, float fallback, float min, float max)
+            => float.IsFinite(value) ? Mathf.Clamp(value, min, max) : fallback;
 
         private static Vector3[] PlaceBuildings(Random random, float usable, float spacing)
         {
@@ -392,8 +436,10 @@ namespace ShiftFour
             equipment?.BindCheckpointMission(layout == fixedLayout ? null : checkpoint);
             var server = layout.GetComponentInChildren<ServerNetworkPuzzle>();
             if (layout == fixedLayout && server != null) server.ResetPuzzle();
+            equipment?.BindServerMission(layout == fixedLayout ? null : server);
             var control = layout.GetComponentInChildren<ControlLockdownMission>();
             if (layout == fixedLayout && control != null) control.ResetMission();
+            equipment?.BindControlMission(layout == fixedLayout ? null : control);
             var storage = layout.GetComponentInChildren<StoragePowerMission>();
             if (layout == fixedLayout && storage != null) storage.ResetMission();
             var extraction = layout.GetComponentInChildren<OpenWorldMissionManager>();
@@ -407,7 +453,10 @@ namespace ShiftFour
             {
                 feedback.SetMissions(buildings, checkpoint, server, control, storage, extraction);
                 feedback.SetProgression(layout.GetComponentInChildren<OutdoorSupplyCache>(),
-                    layout.GetComponentInChildren<CheckpointAccessDoor>(), layout.GetComponentInChildren<ServerAccessDoor>());
+                    layout.GetComponentInChildren<CheckpointAccessDoor>(),
+                    buildings?.Find("Server/Server Access Door")?.GetComponent<BuildingAccessDoor>(),
+                    buildings?.Find("Control/Control Access Door")?.GetComponent<BuildingAccessDoor>(),
+                    buildings?.Find("Storage/Storage Access Door")?.GetComponent<BuildingAccessDoor>());
             }
             else
                 Debug.LogWarning("Open World missions: no active objective HUD under Spawn.", this);

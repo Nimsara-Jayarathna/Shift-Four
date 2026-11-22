@@ -41,6 +41,13 @@ namespace ShiftFour
         private float nextShot;
         public bool HasCommittedToAttack { get; private set; }
         protected virtual float ShotInterval => attackInterval;
+        protected virtual float VisionDistance => visionDistance;
+        protected virtual float AttackRange => attackRange;
+        protected virtual float DamagePerShot => ShotDamage;
+        protected virtual bool CanTarget(Vector3 position) => true;
+        protected virtual bool TryAuthorizeShot() => true;
+        protected virtual void OnDefeated() { }
+        protected virtual string GeneratedPatrolLabel => "Patrol outdoor post ";
         private float lastSeenAt = float.NegativeInfinity;
         private Vector3 lastKnown;
         private Vector3 observedVelocity;
@@ -206,11 +213,12 @@ namespace ShiftFour
                 return;
             }
             motor.SetMovementMode(DroneMovementSpeeds.FromAwareness(Awareness.State));
-            if (outdoorPatrol != null && !visible && Awareness.State == DroneAwarenessState.Patrol)
+            if (outdoorPatrol != null && !visible && ShouldResumePatrol(position))
             {
                 if (Vector3.Distance(transform.position, outdoorPatrol[outdoorPost]) <= outdoorArrivalDistance)
                     outdoorPost = (outdoorPost + 1) % outdoorPatrol.Length;
-                CurrentDecision = "Patrol outdoor post " + (outdoorPost + 1);
+                CurrentDecision = GeneratedPatrolLabel + (outdoorPost + 1);
+                motor.SetMovementMode(DroneMovementMode.Patrol);
                 motor.GoTo(outdoorPatrol[outdoorPost]);
                 return;
             }
@@ -223,8 +231,10 @@ namespace ShiftFour
             }
             CurrentDecision = choice.Name;
             MoveToDecision(choice, visible);
-            if (visible && distance <= attackRange) TryShoot();
+            if (visible && distance <= AttackRange) TryShoot();
         }
+
+        protected virtual bool ShouldResumePatrol(Vector3 targetPosition) => Awareness.State == DroneAwarenessState.Patrol;
 
         protected abstract DecisionOption Decide(bool visible, Vector3 playerPosition, float distance);
 
@@ -251,11 +261,12 @@ namespace ShiftFour
 
         private bool CanSeePlayer()
         {
+            if (!CanTarget(player.transform.position)) return false;
             Vector3 origin = CombatOrigin;
             Vector3 vector = player.EyePosition - origin;
-            if (vector.magnitude > visionDistance) return false;
+            if (vector.magnitude > VisionDistance) return false;
             // Stationed drones watch their entire surroundings rather than waiting to face the player.
-            return ClearShot(origin, vector, visionDistance);
+            return ClearShot(origin, vector, VisionDistance);
         }
 
         private void TryShoot()
@@ -263,23 +274,26 @@ namespace ShiftFour
             using var profileSample=FireProfile.Auto();
             if (!Alive || player == null || !player.GetComponent<Health>().IsAlive ||
                 (outdoorPatrol == null && GameSession.Instance != null && GameSession.Instance.Ended) || Time.time < nextShot) return;
-            if (Vector3.Distance(CombatOrigin, player.EyePosition) > attackRange || !CanSeePlayer()) return;
+            float range = AttackRange;
+            if (Vector3.Distance(CombatOrigin, player.EyePosition) > range || !CanSeePlayer()) return;
             weaponMount?.AimAt(player.EyePosition);
             // A protruding barrel cannot bypass cover between its mounting point and tip.
             if (weaponMount != null && !ClearShotAtFire(weaponMount.PivotPosition,
-                player.EyePosition - weaponMount.PivotPosition, attackRange, out _)) return;
-            nextShot = Time.time + ShotInterval;
+                player.EyePosition - weaponMount.PivotPosition, range, out _)) return;
             Vector3 origin = CombatOrigin;
             Vector3 vector = player.EyePosition - origin;
             // A second raycast at fire time makes solid shelves and pillars real cover.
-            if (ClearShotAtFire(origin, vector, attackRange, out Vector3 hitPoint))
+            bool clear = ClearShotAtFire(origin, vector, range, out Vector3 hitPoint);
+            if (clear && !TryAuthorizeShot()) return;
+            nextShot = Time.time + ShotInterval;
+            if (clear)
             {
                 HasCommittedToAttack = true;
                 if (outdoorPatrol == null) Awareness?.CommitToCombat(Time.time);
                 LastShotOrigin = origin;
                 LastShotHit = hitPoint;
                 WeaponAimPoint = player.EyePosition;
-                player.GetComponent<Health>().ApplyDamage(ShotDamage, this, "Drone shot: " + agentName);
+                player.GetComponent<Health>().ApplyDamage(DamagePerShot, this, "Drone shot: " + agentName);
                 ShotFired?.Invoke(this);
                 SoundEvents.ReportNoise(origin, NoiseCategory.Gunshot, 1f, this);
             }
@@ -316,6 +330,7 @@ namespace ShiftFour
             if (Hearing != null) Hearing.enabled = false;
             motor.Stop();
             foreach (Collider body in GetComponentsInChildren<Collider>()) body.enabled = false;
+            OnDefeated();
             if (outdoorPatrol == null) GameSession.Instance?.DroneDestroyed(this);
         }
 

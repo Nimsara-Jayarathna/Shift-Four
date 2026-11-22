@@ -9,8 +9,8 @@ namespace ShiftFour
     {
         public const string VictoryMessage = "MISSION COMPLETE - FACILITY ESCAPED";
         public const int RequiredMissions = 4;
-        public const int RequiredDrones = 4;
-        private static readonly string[] DroneNames = { "Scout", "Guard", "Interceptor", "Flanker" };
+        public const int RequiredDrones = 3;
+        private static readonly string[] DroneNames = { "Scout", "Guard", "Flanker" };
 
         private CheckpointSecurityScanner checkpoint;
         private ServerNetworkPuzzle server;
@@ -80,13 +80,13 @@ namespace ShiftFour
                 Debug.LogWarning("Open World extraction: the player or its Health reference is missing.", this);
         }
 
-        internal void BindDrones(Transform layout)
+        internal void BindDrones(Transform layout, GuardBrain serverGuard, OutdoorScout checkpointScout, FlankerBrain storageFlanker)
         {
             ListenToDrones(false);
-            drones[0] = layout.GetComponentInChildren<OutdoorScout>()?.GetComponent<Health>();
-            drones[1] = layout.GetComponentInChildren<GuardBrain>()?.GetComponent<Health>();
-            drones[2] = layout.GetComponentInChildren<InterceptorBrain>()?.GetComponent<Health>();
-            drones[3] = layout.GetComponentInChildren<FlankerBrain>()?.GetComponent<Health>();
+            drones[0] = checkpointScout != null ? checkpointScout.GetComponent<Health>() : null;
+            // The original Server Guard remains the extraction target for this archetype.
+            drones[1] = serverGuard != null ? serverGuard.GetComponent<Health>() : null;
+            drones[2] = storageFlanker != null ? storageFlanker.GetComponent<Health>() : null;
             ListenToDrones(true);
 
             for (int i = 0; i < drones.Length; i++)

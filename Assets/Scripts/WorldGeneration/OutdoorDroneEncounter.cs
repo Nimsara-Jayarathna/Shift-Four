@@ -13,12 +13,15 @@ namespace ShiftFour
         private Camera playerView;
         private Health health;
 
-        internal static void Spawn<T>(Transform world, GameObject prefab, PlayerController player, string building,
-            int buildingIndex, string role, Material accent, PrototypeMaterials materials, Font font, int seed)
+        internal static T Spawn<T>(Transform world, GameObject prefab, PlayerController player, string building,
+            int buildingIndex, string role, Material accent, PrototypeMaterials materials, Font font, int seed,
+            Transform parent = null, string post = null, IndoorGuardZone zone = null, int slot = 0,
+            OutdoorFlankerAmbush ambush = null, OutdoorInterceptorResponse interceptor = null)
             where T : DroneBrain
         {
             Transform area = world.Find($"Buildings/{building}");
-            var encounter = Group(building + " Security", world).gameObject.AddComponent<OutdoorDroneEncounter>();
+            var encounter = Group(post ?? building + " Security", parent != null ? parent : world)
+                .gameObject.AddComponent<OutdoorDroneEncounter>();
             try
             {
                 if (area == null) throw new InvalidOperationException($"The generated {building} building is missing.");
@@ -32,42 +35,62 @@ namespace ShiftFour
                 if (player == null || player.ViewCamera == null || player.GetComponent<Health>() == null)
                     throw new InvalidOperationException("Spawn needs an outdoor player with a camera and Health.");
 
-                encounter.Build<T>(area, prefab, player, agent, body, buildingIndex, role, accent, materials, font);
-                Debug.Log($"Open World: {role} spawned by {building} on seed {seed} using {typeof(T).Name}.", encounter);
+                T brain = encounter.Build<T>(area, prefab, player, agent, body, buildingIndex, role, accent,
+                    materials, font, zone, slot, ambush, interceptor);
+                Debug.Log($"Open World: {role} spawned by {building}, {encounter.name}, on seed {seed} using {typeof(T).Name}.", encounter);
+                return brain;
             }
             catch (Exception error)
             {
                 Debug.LogWarning($"Open World: {role} spawn failed by {building} on seed {seed}. {error.Message}", encounter);
                 encounter.gameObject.SetActive(false);
                 Destroy(encounter.gameObject);
+                return null;
             }
         }
 
-        private void Build<T>(Transform area, GameObject prefab, PlayerController player, NavMeshAgent templateAgent,
-            DroneBody body, int buildingIndex, string role, Material accent, PrototypeMaterials materials, Font font)
+        private T Build<T>(Transform area, GameObject prefab, PlayerController player, NavMeshAgent templateAgent,
+            DroneBody body, int buildingIndex, string role, Material accent, PrototypeMaterials materials, Font font,
+            IndoorGuardZone zone, int slot, OutdoorFlankerAmbush ambush, OutdoorInterceptorResponse interceptor)
             where T : DroneBrain
         {
             float side = buildingIndex == 1 ? 1f : -1f;
             float front = -ResearchBuildingBuilder.FrontOffset(buildingIndex);
             var filter = new NavMeshQueryFilter { agentTypeID = templateAgent.agentTypeID, areaMask = templateAgent.areaMask };
             var route = new NavMeshPath();
-            Vector3[] patrol = FindPatrol(area, body, front, side, filter, route);
+            Vector3[] patrol = interceptor?.Posts ?? ambush?.Posts ??
+                (zone != null ? zone.Patrol(slot) : FindPatrol(area, body, front, side, filter, route));
             if (patrol == null) throw new InvalidOperationException("No clear four-post patrol loop on the outdoor NavMesh.");
-            Vector3? facadeCover = null;
-            if (typeof(T) == typeof(GuardBrain) &&
-                TryPost(area, new Vector3(side * 14.8f, 0, front + .8f), body, filter, out Vector3 cover) &&
-                Connected(patrol[0], cover, filter, route))
-                facadeCover = cover;
-            var graph = BuildGraph(area, body, patrol, facadeCover, front, side, filter, route);
+            var graph = interceptor?.Graph ?? ambush?.Graph ??
+                (zone != null ? zone.Graph : BuildGraph(area, body, patrol, front, side, filter, route));
 
             Transform staging = Group(role + " Unit", transform);
             staging.gameObject.SetActive(false);
-            var instance = Instantiate(prefab, patrol[0], Quaternion.LookRotation(patrol[1] - patrol[0]), staging);
-            instance.name = "Outdoor " + role;
+            Vector3 heading = ambush != null ? Vector3.ProjectOnPlane(ambush.Center - patrol[0], Vector3.up) :
+                patrol[1] - patrol[0];
+            var instance = Instantiate(prefab, patrol[0], heading.sqrMagnitude > .001f ?
+                Quaternion.LookRotation(heading) : Quaternion.identity, staging);
+            instance.name = (zone != null ? "Indoor " : "Outdoor ") + role;
             T brain = instance.GetComponent<T>();
             brain.Configure(instance.name, patrol[0]);
             brain.ConfigureOutdoor(player, graph, patrol);
-            if (brain is GuardBrain guard) guard.SetCover(facadeCover ?? patrol[2], patrol[3]);
+            if (zone != null && brain is GuardBrain guard)
+            {
+                guard.ConfigureZone(zone, slot);
+                var navigation = instance.GetComponent<NavMeshAgent>();
+                navigation.avoidancePriority = 46 + slot * 3;
+                navigation.autoRepath = false;
+            }
+            if (ambush != null && brain is FlankerBrain flanker)
+            {
+                flanker.ConfigureAmbush(ambush, player);
+                instance.GetComponent<NavMeshAgent>().autoRepath = false;
+            }
+            if (interceptor != null && brain is InterceptorBrain responder)
+            {
+                responder.ConfigureResponse(interceptor);
+                instance.GetComponent<NavMeshAgent>().autoRepath = false;
+            }
             playerView = player.ViewCamera;
             health = instance.GetComponent<Health>();
             marker = OutdoorScoutEncounter.CreateMarker(instance.transform, materials, font, playerView,
@@ -80,6 +103,7 @@ namespace ShiftFour
                 !Array.Exists(visuals.GetComponentsInChildren<MeshRenderer>(), mesh => mesh.enabled &&
                     mesh.GetComponent<MeshFilter>()?.sharedMesh != null))
                 throw new InvalidOperationException("The prefab failed to initialize its visible model, weapon mount or shot effects.");
+            return brain;
         }
 
         private static Vector3[] FindPatrol(Transform area, DroneBody body, float front, float side,
@@ -102,13 +126,12 @@ namespace ShiftFour
             return null;
         }
 
-        private WaypointGraph BuildGraph(Transform area, DroneBody body, Vector3[] patrol, Vector3? facadeCover, float front,
+        private WaypointGraph BuildGraph(Transform area, DroneBody body, Vector3[] patrol, float front,
             float side, NavMeshQueryFilter filter, NavMeshPath route)
         {
             Transform root = Group("Outdoor Waypoint Graph", transform);
             var nodes = new List<Transform>();
             foreach (Vector3 post in patrol) AddNode(root, nodes, post);
-            if (facadeCover.HasValue) AddNode(root, nodes, facadeCover.Value);
             foreach (Vector3 local in new[]
             {
                 new Vector3(0f, 0, front - 10f), new Vector3(side * 14.5f, 0, front - 10f),
@@ -134,7 +157,7 @@ namespace ShiftFour
             nodes.Add(node);
         }
 
-        private static bool TryPost(Transform area, Vector3 local, DroneBody body, NavMeshQueryFilter filter, out Vector3 point)
+        internal static bool TryPost(Transform area, Vector3 local, DroneBody body, NavMeshQueryFilter filter, out Vector3 point)
         {
             point = default;
             if (!NavMesh.SamplePosition(area.TransformPoint(local), out NavMeshHit hit, .9f, filter) ||

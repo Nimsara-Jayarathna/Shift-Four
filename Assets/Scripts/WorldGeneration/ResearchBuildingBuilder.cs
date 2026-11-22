@@ -16,6 +16,13 @@ namespace ShiftFour
         };
 
         public static float FrontOffset(int index) => Sizes[index].z * .5f;
+        internal static float EntranceWidth(int index) => index == 3 ? 10f : 4f;
+        internal static Bounds InteriorBounds(int index)
+        {
+            Vector3 size = Sizes[index];
+            return new Bounds(Vector3.up * ((size.y + FloorHeight) * .5f),
+                size - new Vector3(WallThickness * 2f, FloorHeight, WallThickness * 2f));
+        }
 
         public static void Build(Transform parent, PrototypeMaterials materials, Font font, Vector3[] positions = null)
         {
@@ -66,7 +73,7 @@ namespace ShiftFour
         {
             Vector3 size = Sizes[type];
             float front = -FrontOffset(type);
-            float entranceWidth = type == 3 ? 10f : 4f;
+            float entranceWidth = EntranceWidth(type);
             Material facade = type == 1 ? m.Metal : m.Wall;
             Transform walls = Group("Walls", root);
             float sideX = (size.x - WallThickness) * .5f;

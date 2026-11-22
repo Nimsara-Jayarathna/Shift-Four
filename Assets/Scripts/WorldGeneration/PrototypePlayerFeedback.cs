@@ -18,12 +18,23 @@ namespace ShiftFour
         private StoragePowerMission storage;
         private OpenWorldMissionManager extraction;
         private OutdoorSupplyCache supplyCache;
+        private OutdoorScoutEncounter scoutPatrols;
+        private OutdoorFlankerAmbushes flankerAmbushes;
+        private OutdoorInterceptorDispatch interceptorDispatch;
         private CheckpointAccessDoor checkpointDoor;
-        private ServerAccessDoor serverDoor;
+        private BuildingAccessDoor serverDoor, controlDoor, storageDoor;
         private OutdoorPlayerEquipment equipment;
         private BoxCollider checkpointFloor, serverFloor, controlFloor, storageFloor;
         private GUIStyle titleStyle, objectiveStyle, detailStyle, victoryStyle;
         public OpenWorldMissionManager ExtractionManager => extraction;
+
+        internal void SetOutdoorEncounters(OutdoorScoutEncounter patrols, OutdoorFlankerAmbushes ambushes,
+            OutdoorInterceptorDispatch interceptors)
+        {
+            scoutPatrols = patrols;
+            flankerAmbushes = ambushes;
+            interceptorDispatch = interceptors;
+        }
 
         internal void SetMissions(Transform buildings, CheckpointSecurityScanner scanner, ServerNetworkPuzzle network,
             ControlLockdownMission lockdown, StoragePowerMission power, OpenWorldMissionManager finalMission)
@@ -39,11 +50,14 @@ namespace ShiftFour
             storageFloor = FindFloor(buildings, "Storage");
         }
 
-        internal void SetProgression(OutdoorSupplyCache cache, CheckpointAccessDoor door, ServerAccessDoor serverAccess)
+        internal void SetProgression(OutdoorSupplyCache cache, CheckpointAccessDoor door,
+            BuildingAccessDoor serverAccess, BuildingAccessDoor controlAccess, BuildingAccessDoor storageAccess)
         {
             supplyCache = cache;
             checkpointDoor = door;
             serverDoor = serverAccess;
+            controlDoor = controlAccess;
+            storageDoor = storageAccess;
         }
 
         private void Start()
@@ -65,6 +79,30 @@ namespace ShiftFour
 
             DrawMissions();
             if (extraction != null) DrawExtractionTracker();
+            if (interceptorDispatch != null && interceptorDispatch.HasWarning)
+                GUI.Box(new Rect((Screen.width - 210f) * .5f, Screen.height * .5f - 138f, 210f, 25f),
+                    "INTERCEPTOR RESPONDING");
+            if (scoutPatrols != null && scoutPatrols.HasAlert)
+            {
+                Color previous = GUI.contentColor;
+                GUI.contentColor = new Color(1f, .68f, .25f);
+                GUI.Box(new Rect((Screen.width - 126f) * .5f, Screen.height * .5f - 78f, 126f, 25f), "SCOUT ALERT");
+                GUI.contentColor = previous;
+            }
+            FlankerBrain warning = flankerAmbushes != null ? flankerAmbushes.Warning : null;
+            if (warning != null)
+            {
+                Vector3 offset = warning.transform.position - player.transform.position;
+                float ahead = Vector3.Dot(player.transform.forward, offset);
+                float side = Vector3.Dot(player.transform.right, offset);
+                string direction = ahead < -Mathf.Abs(side) ? "BEHIND" :
+                    Mathf.Abs(side) < Mathf.Abs(ahead) * .35f ? "AHEAD" : side < 0f ? "LEFT" : "RIGHT";
+                Color previous = GUI.contentColor;
+                GUI.contentColor = new Color(1f, .65f, .28f);
+                GUI.Box(new Rect((Screen.width - 196f) * .5f, Screen.height * .5f - 108f, 196f, 25f),
+                    "FLANKER THREAT · " + direction);
+                GUI.contentColor = previous;
+            }
 
             if (Cursor.lockState == CursorLockMode.Locked)
             {
@@ -163,31 +201,44 @@ namespace ShiftFour
             if (focus != Mission.Storage && storage != null && storage.isActiveAndEnabled)
                 top = DrawSummary(top, width, scale, "Storage", storage.Objective, storage.IsComplete);
 
-            if (supplyCache != null && supplyCache.isActiveAndEnabled)
-            {
+            if (storageDoor != null || controlDoor != null || serverDoor != null || (supplyCache != null && supplyCache.isActiveAndEnabled))
                 DrawProgression(top, width, scale);
-            }
         }
 
         private void DrawProgression(float top, float width, float scale)
         {
+            bool storageOpen = storageDoor != null && storageDoor.IsOpen;
+            bool powerRestored = storage != null && storage.IsComplete;
+            bool hasStorageKey = equipment != null && equipment.HasStorageKey;
+            bool controlOpen = controlDoor != null && controlDoor.IsOpen;
+            bool hasControlKey = equipment != null && equipment.HasControlKey;
             bool hasServerKey = equipment != null && equipment.HasServerKey;
             bool serverOpen = serverDoor != null && serverDoor.IsOpen;
             bool checkpointOpen = checkpointDoor != null && checkpointDoor.IsOpen;
-            string objective = serverOpen ? "Server Entrance Unlocked" :
-                hasServerKey ? "Reach Server Building" :
-                checkpointOpen ? "Complete Checkpoint Security" : supplyCache.Objective;
+            string objective = powerRestored ? "Storage Power Restored" :
+                storageOpen ? "Restore Storage Power" :
+                hasStorageKey ? "Reach Storage Building" :
+                controlOpen ? "Complete Control Lockdown" :
+                hasControlKey ? "Reach Control Building" :
+                serverOpen ? "Complete Server Hacking" :
+                hasServerKey ? "REACH SERVER BUILDING" :
+                checkpointOpen ? "Complete Checkpoint Security" : supplyCache?.Objective ?? "Reach Checkpoint";
 
-            string notice = serverDoor != null ? serverDoor.Notice : string.Empty;
+            string notice = storageDoor != null ? storageDoor.Notice : string.Empty;
+            if (string.IsNullOrEmpty(notice) && equipment != null) notice = equipment.StorageKeyNotice;
+            if (string.IsNullOrEmpty(notice) && controlDoor != null) notice = controlDoor.Notice;
+            if (string.IsNullOrEmpty(notice) && equipment != null) notice = equipment.ControlKeyNotice;
+            if (string.IsNullOrEmpty(notice) && serverDoor != null) notice = serverDoor.Notice;
             if (string.IsNullOrEmpty(notice) && equipment != null) notice = equipment.ServerKeyNotice;
             if (string.IsNullOrEmpty(notice) && checkpointDoor != null) notice = checkpointDoor.Notice;
-            if (string.IsNullOrEmpty(notice)) notice = supplyCache.Notice;
+            if (string.IsNullOrEmpty(notice) && supplyCache != null) notice = supplyCache.Notice;
 
             if (string.IsNullOrEmpty(notice))
-                DrawSummary(top, width, scale, "Progression", objective, serverOpen, showCompletedObjective: true);
+                DrawSummary(top, width, scale, "Progression", objective, powerRestored, showCompletedObjective: true);
             else
-                DrawObjective(top, width, scale, "PROGRESSION", objective, string.Empty, notice, serverOpen,
-                    CompleteAccent, notice == "CHECKPOINT KEY REQUIRED" || notice == ServerAccessDoor.KeyRequired);
+                DrawObjective(top, width, scale, "PROGRESSION", objective, string.Empty, notice, powerRestored, CompleteAccent,
+                    notice == "CHECKPOINT KEY REQUIRED" || notice == serverDoor?.KeyRequired ||
+                    notice == controlDoor?.KeyRequired || notice == storageDoor?.KeyRequired);
         }
 
         private void DrawExtractionTracker()

@@ -24,11 +24,19 @@ namespace ShiftFour
         private float clearanceSpeed;
         private bool detouring;
         private Vector3 detourPoint;
+        private float flightOffset;
         private static readonly float[] AvoidanceAngles = { 30f, -30f, 60f, -60f, 90f, -90f, 120f, -120f };
         public bool MotionBlocked { get; private set; }
         public float HorizontalRadius => Mathf.Max(envelopeExtents.x, envelopeExtents.z);
-        public Vector3 EnvelopeCenter => envelopeCenter;
+        public Vector3 EnvelopeCenter => envelopeCenter + Vector3.up * flightOffset;
         public Vector3 EnvelopeExtents => envelopeExtents;
+
+        internal void SetFlightOffset(float offset)
+        {
+            var collision = GetComponent<CapsuleCollider>();
+            collision.center += Vector3.up * (offset - flightOffset);
+            flightOffset = offset;
+        }
 
         private void Awake()
         {
@@ -43,11 +51,11 @@ namespace ShiftFour
 
         public bool CanOccupy(Vector3 position)
         {
-            int count=Physics.OverlapBoxNonAlloc(position+envelopeCenter,envelopeExtents,overlaps,
+            int count=Physics.OverlapBoxNonAlloc(position+EnvelopeCenter,envelopeExtents,overlaps,
                 Quaternion.identity,~0,QueryTriggerInteraction.Ignore);
             // A full buffer may have omitted the blocker. Fall back to all hits rather than
             // silently accepting a truncated query in a crowded/dynamically extended scene.
-            Collider[] hits=count==overlaps.Length ? Physics.OverlapBox(position+envelopeCenter,
+            Collider[] hits=count==overlaps.Length ? Physics.OverlapBox(position+EnvelopeCenter,
                 envelopeExtents,Quaternion.identity,~0,QueryTriggerInteraction.Ignore) : overlaps;
             if(hits!=overlaps)count=hits.Length;
             for(int i=0;i<count;i++)if(External(hits[i]))return false;
@@ -59,9 +67,9 @@ namespace ShiftFour
             float distance = displacement.magnitude;
             if (distance < .00001f) return position;
             float allowed = distance;
-            int count=Physics.BoxCastNonAlloc(position+envelopeCenter,envelopeExtents,displacement/distance,
+            int count=Physics.BoxCastNonAlloc(position+EnvelopeCenter,envelopeExtents,displacement/distance,
                 sweepHits,Quaternion.identity,distance+clearance,~0,QueryTriggerInteraction.Ignore);
-            RaycastHit[] hits=count==sweepHits.Length ? Physics.BoxCastAll(position+envelopeCenter,
+            RaycastHit[] hits=count==sweepHits.Length ? Physics.BoxCastAll(position+EnvelopeCenter,
                 envelopeExtents,displacement/distance,Quaternion.identity,distance+clearance,~0,
                 QueryTriggerInteraction.Ignore) : sweepHits;
             if(hits!=sweepHits)count=hits.Length;

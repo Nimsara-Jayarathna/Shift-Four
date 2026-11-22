@@ -29,6 +29,7 @@ namespace ShiftFour
         [SerializeField] private Transform[] nodes;
         [SerializeField] private GraphEdge[] edges;
         private readonly bool[] gatesOpen = new bool[4];
+        private Func<Vector3, Vector3, bool> connectionValidator;
         [SerializeField] private int contractVersion;
         public int ContractVersion => contractVersion;
         public bool IsKnownLegacyLayout
@@ -53,6 +54,9 @@ namespace ShiftFour
             Version++;
         }
 
+        internal void SetConnectionValidator(Func<Vector3, Vector3, bool> validator)
+            => connectionValidator = validator;
+
         public void SetDoorOpen(bool open) => SetGateOpen(0, open);
 
         public void SetGateOpen(int gateId, bool open)
@@ -73,11 +77,16 @@ namespace ShiftFour
             List<Vector3> route = new List<Vector3>();
             if (nodes == null || nodes.Length == 0 || edges == null ||
                 !IsFinite(origin) || !IsFinite(destination)) return route;
+            if (connectionValidator != null && CanConnect(origin, destination))
+            {
+                route.Add(destination);
+                return route;
+            }
             int start = Nearest(origin);
             int goal = Nearest(destination);
             if (start < 0 || goal < 0) return route;
             // A shared nearest node does not prove that two world positions are connected.
-            if (start == goal)
+            if (start == goal && connectionValidator == null)
             {
                 if (CanConnect(origin, destination)) route.Add(destination);
                 return route;
@@ -142,9 +151,10 @@ namespace ShiftFour
         private static bool IsFinite(Vector3 point)
             => !float.IsNaN(point.sqrMagnitude) && !float.IsInfinity(point.sqrMagnitude);
 
-        private static bool CanConnect(Vector3 from, Vector3 to)
+        private bool CanConnect(Vector3 from, Vector3 to)
         {
             using var sample = ConnectMarker.Auto();
+            if (connectionValidator != null) return connectionValidator(from, to);
             if (from == to) return true; // Exact graph-node queries need no local connector.
             // SamplePosition alone does not establish connectivity across walls or gates.
             if (!NavMesh.SamplePosition(from, out NavMeshHit start, 0.25f, NavMesh.AllAreas) ||

@@ -26,6 +26,7 @@ namespace ShiftFour
         private float instructionsUntil;
 
         public bool IsComplete => completed == ActivationOrder.Length;
+        internal event System.Action<ServerNetworkPuzzle> Completed;
         public string Objective => $"Restore Server Network ({completed}/{ActivationOrder.Length})";
         public string Prompt => "E: Read Server Sequence";
         public bool HasWarning => warning != null;
@@ -68,7 +69,11 @@ namespace ShiftFour
             completed++;
             terminal.SetOnline(true);
             UpdateDisplay();
-            if (IsComplete) Debug.Log(CompletionMessage, this);
+            if (IsComplete)
+            {
+                Completed?.Invoke(this);
+                Debug.Log(CompletionMessage, this);
+            }
         }
 
         internal void ResetPuzzle()

@@ -33,7 +33,7 @@ namespace ShiftFour
             _ => "On the security desk inside Checkpoint"
         };
         public bool IsComplete => stage == Stage.Complete;
-        internal float CompletedAt { get; private set; } = float.NegativeInfinity;
+        internal event System.Action<CheckpointSecurityScanner> Completed;
         public string Notice => Time.unscaledTime < deniedUntil ? CardRequired : string.Empty;
 
         internal void Configure(SecurityAccessCard accessCard, Renderer lamp, Light fill, TextMesh display)
@@ -66,15 +66,14 @@ namespace ShiftFour
             }
 
             stage = Stage.Complete;
-            CompletedAt = Time.unscaledTime;
             UpdateDisplay();
+            Completed?.Invoke(this);
             Debug.Log(CompletionMessage, this);
         }
 
         internal void ResetMission()
         {
             stage = Stage.FindCard;
-            CompletedAt = float.NegativeInfinity;
             deniedUntil = 0;
             if (card != null) card.gameObject.SetActive(true);
             UpdateDisplay();

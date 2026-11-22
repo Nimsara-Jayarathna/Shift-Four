@@ -24,6 +24,7 @@ namespace ShiftFour
         private float deniedUntil;
 
         public bool IsComplete { get; private set; }
+        internal event System.Action<ControlLockdownMission> Completed;
         private bool IsReady => activated == SwitchCount;
         public string SwitchProgress => $"Disable Security Switches ({activated}/{SwitchCount})";
         public string Objective => IsComplete ? CompletionMessage :
@@ -58,6 +59,7 @@ namespace ShiftFour
             IsComplete = true;
             deniedUntil = 0f;
             UpdateDisplay();
+            Completed?.Invoke(this);
             Debug.Log(CompletionMessage, this);
         }
 
