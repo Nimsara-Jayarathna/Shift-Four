@@ -110,7 +110,10 @@ namespace ShiftFour
             var model = Resources.Load<GameObject>("SF_CheckpointExterior");
             Transform exterior = Group("ExteriorDetails", root);
             if (model != null)
+            {
                 Object.Instantiate(model, exterior, false).name = "Armored shell";
+                CheckpointFacadeCollision.Build(exterior, size.x * .5f, front);
+            }
             else
             {
                 Debug.LogWarning("Open World Checkpoint exterior: SF_CheckpointExterior is missing. Using built-in exterior geometry.", exterior);
@@ -171,11 +174,11 @@ namespace ShiftFour
             for (int side = -1; side <= 1; side += 2)
             {
                 Box("Armored jamb", exterior, new Vector3(side * 2.73f, 2.22f, front - .66f),
-                    new Vector3(1.02f, 4.4f, 1f), m.Metal, false);
+                    new Vector3(1.02f, 4.4f, 1f), m.Metal);
                 Box("Entrance light strip", exterior, new Vector3(side * 2.73f, 2.22f, front - 1.18f),
                     new Vector3(.14f, 3.2f, .08f), signal, false);
                 Box("Reinforced barrier", exterior, new Vector3(side * 9.15f, .53f, front - 1.05f),
-                    new Vector3(4.5f, 1f, .66f), m.Metal, false);
+                    new Vector3(4.5f, 1f, .66f), m.Metal);
                 Box("Barrier amber trim", exterior, new Vector3(side * 9.15f, .53f, front - 1.4f),
                     new Vector3(1.6f, .19f, .06f), m.Checkpoint, false);
                 Box("Rooftop vent housing", exterior, new Vector3(side * 3.2f, size.y + 2.15f, 2.6f),

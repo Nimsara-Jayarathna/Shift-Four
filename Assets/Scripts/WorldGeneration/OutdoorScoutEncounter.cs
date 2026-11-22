@@ -148,11 +148,17 @@ namespace ShiftFour
                             float diameter = (footprint.size.y + 2.6f) * .57f;
                             footprint.size = new Vector3(diameter, footprint.size.y, diameter);
                         }
+                        else if (group == "Rocks")
+                        {
+                            // A flying hull must also clear the wider visible rock silhouette.
+                            float diameter = OutdoorScenery.BoulderSize.x * 2f * 1.05f;
+                            footprint.size = new Vector3(diameter, footprint.size.y, diameter);
+                        }
                         Exclude(sources, footprint, 5f);
                     }
 
             Transform storage = world.Find("Buildings/Storage");
-            // The cargo-handling facade is decorative and does not supply physics colliders.
+            // Keep aerial routes outside the dock's loading lane and tall cargo as a unit.
             Exclude(sources, new Bounds(storage.TransformPoint(new Vector3(11f, 1f,
                 -ResearchBuildingBuilder.FrontOffset(3) - 4.3f)), new Vector3(10f, 4f, 7.5f)), 5f);
 

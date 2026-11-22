@@ -17,6 +17,7 @@ namespace ShiftFour
         [SerializeField, Min(0.01f)] private float clearance = .04f;
         private NavMeshAgent agent;
         private DroneMotor motor;
+        private CapsuleCollider hitbox;
         private Collider blocker;
         private readonly Collider[] overlaps = new Collider[32];
         private readonly RaycastHit[] sweepHits = new RaycastHit[32];
@@ -42,12 +43,15 @@ namespace ShiftFour
         {
             agent = GetComponent<NavMeshAgent>();
             motor = GetComponent<DroneMotor>();
+            hitbox = GetComponent<CapsuleCollider>();
             agent.updatePosition = false;
         }
 
         private bool External(Collider other)
             => other != null && !other.transform.IsChildOf(transform) &&
-                !Physics.GetIgnoreLayerCollision(gameObject.layer, other.gameObject.layer);
+                !Physics.GetIgnoreLayerCollision(gameObject.layer, other.gameObject.layer) &&
+                // Scene queries do not honor the wreck rig's pairwise actor exclusions.
+                (hitbox == null || !Physics.GetIgnoreCollision(hitbox, other));
 
         public bool CanOccupy(Vector3 position)
         {

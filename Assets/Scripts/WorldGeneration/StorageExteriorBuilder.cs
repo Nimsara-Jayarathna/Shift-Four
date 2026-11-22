@@ -29,13 +29,13 @@ namespace ShiftFour
             Label("STORAGE FACILITY 04", entrance, new Vector3(0, 7.91f, -1.42f), .96f, font, 18.7f, 1.28f, m.Lettering);
 
             // Above and outside the original ten-metre doorway and its solid canopy.
-            Panel("Portal crossbeam", entrance, new Vector3(0, 4.82f, -.72f), new Vector3(12.1f, .78f, 1.36f), m.Concrete);
+            Panel("Portal crossbeam", entrance, new Vector3(0, 4.82f, -.72f), new Vector3(12.1f, .78f, 1.36f), m.Concrete, solid: true);
             Panel("Lintel inset", entrance, new Vector3(0, 4.82f, -1.42f), new Vector3(10.84f, .55f, .12f), m.Metal);
             Label("CARGO HANDLING", entrance, new Vector3(0, 4.83f, -1.50f), .24f, font, 4.6f, .33f, m.Lettering);
             for (int side = -1; side <= 1; side += 2)
             {
                 float x = side * 5.73f;
-                Panel("Portal upright", entrance, new Vector3(x, 2.31f, -.5f), new Vector3(1.19f, 4.62f, 1.02f), m.Metal);
+                Panel("Portal upright", entrance, new Vector3(x, 2.31f, -.5f), new Vector3(1.19f, 4.62f, 1.02f), m.Metal, solid: true);
                 Panel("Upright armor", entrance, new Vector3(x, 2.77f, -1.06f), new Vector3(.73f, 3.42f, .18f), m.Concrete);
                 Lamp("Portal amber strip", entrance, new Vector3(x, 3f, -1.17f), new Vector3(.12f, 2.63f, .09f), signal, amber);
                 Hazards("Portal hazard plate", entrance, new Vector3(x, .69f, -1.13f), 3, m);
@@ -49,7 +49,7 @@ namespace ShiftFour
         private static void BuildDock(Transform dock, PrototypeMaterials m, Material signal, MaterialPropertyBlock amber, Font font)
         {
             // The dock occupies the east wing of the reserved front yard. The road and Flanker loop lie to the west.
-            Panel("Loading platform", dock, new Vector3(10.88f, .069f, -4.26f), new Vector3(9.66f, .14f, 6.9f), m.Concrete);
+            Panel("Loading platform", dock, new Vector3(10.88f, .069f, -4.26f), new Vector3(9.66f, .14f, 6.9f), m.Concrete, solid: true);
             // This flush strip meets the old apron and continues its paving into the loading bay.
             Panel("Apron to dock paving", dock, new Vector3(5.86f, .112f, -3.38f), new Vector3(.31f, .012f, 3.05f), m.Concrete);
             Panel("Dock edge", dock, new Vector3(10.9f, .146f, -7.58f), new Vector3(9.46f, .014f, .15f), m.Metal);
@@ -77,8 +77,8 @@ namespace ShiftFour
             Label("KEEP CLEAR", crane, new Vector3(0, 6.24f, -.56f), .29f, font, 5.5f, .36f, m.Lettering);
 
             Transform barrier = Group("Outer dock barrier", dock, new Vector3(15.22f, .139f, -6.75f));
-            Panel("Barrier plinth", barrier, new Vector3(0, .24f, 0), new Vector3(.54f, .5f, 1.43f), m.Concrete);
-            Panel("Barrier wall", barrier, new Vector3(0, .74f, 0), new Vector3(.34f, .65f, 1.25f), m.Metal);
+            Panel("Barrier plinth", barrier, new Vector3(0, .24f, 0), new Vector3(.54f, .5f, 1.43f), m.Concrete, solid: true);
+            Panel("Barrier wall", barrier, new Vector3(0, .74f, 0), new Vector3(.34f, .65f, 1.25f), m.Metal, solid: true);
             Panel("Barrier yellow stripe", barrier, new Vector3(0, .82f, -.65f), new Vector3(.32f, .16f, .08f), m.Checkpoint);
             Panel("Dock warning board", dock, new Vector3(14.88f, 2.64f, -.52f), new Vector3(1.78f, .67f, .13f), m.Metal);
             Label("LOADING ZONE", dock, new Vector3(14.88f, 2.64f, -.60f), .16f, font, 1.62f, .28f, m.Lettering);
@@ -86,7 +86,7 @@ namespace ShiftFour
 
         private static void Container(Transform freight, float length, float height, Material siding, PrototypeMaterials m, Font font)
         {
-            Panel("Steel shell", freight, Vector3.up * (height * .5f), new Vector3(2.38f, height, length), siding);
+            Panel("Steel shell", freight, Vector3.up * (height * .5f), new Vector3(2.38f, height, length), siding, solid: true);
             foreach (float y in new[] { .10f, height - .08f })
                 Panel("Steel stacking rail", freight, Vector3.up * y, new Vector3(2.56f, .20f, length + .16f), m.Metal);
             for (int side = -1; side <= 1; side += 2)
@@ -106,11 +106,11 @@ namespace ShiftFour
 
         private static void BuildForklift(Transform loader, PrototypeMaterials m, Material signal, MaterialPropertyBlock amber)
         {
-            Panel("Forklift chassis", loader, new Vector3(0, .61f, .21f), new Vector3(1.68f, .42f, 2.32f), m.Metal);
-            Panel("Orange counterweight", loader, new Vector3(0, 1.01f, .89f), new Vector3(1.59f, .63f, .94f), m.Checkpoint);
+            Panel("Forklift chassis", loader, new Vector3(0, .61f, .21f), new Vector3(1.68f, .42f, 2.32f), m.Metal, solid: true);
+            Panel("Orange counterweight", loader, new Vector3(0, 1.01f, .89f), new Vector3(1.59f, .63f, .94f), m.Checkpoint, solid: true);
             Panel("Operator seat", loader, new Vector3(0, 1.19f, .25f), new Vector3(.57f, .23f, .60f), m.Metal);
             Panel("Seat back", loader, new Vector3(0, 1.48f, .53f), new Vector3(.53f, .57f, .14f), m.Metal);
-            Panel("Overhead guard", loader, new Vector3(0, 2.36f, .21f), new Vector3(1.55f, .19f, 1.5f), m.Checkpoint);
+            Panel("Overhead guard", loader, new Vector3(0, 2.36f, .21f), new Vector3(1.55f, .19f, 1.5f), m.Checkpoint, solid: true);
             Lamp("Forklift marker lamp", loader, new Vector3(0, 2.5f, .24f), new Vector3(.24f, .12f, .21f), signal, amber);
             for (int side = -1; side <= 1; side += 2)
             {
@@ -121,7 +121,7 @@ namespace ShiftFour
                     Rod("Steel wheel hub", loader, axle + Vector3.right * (side * .14f), axle + Vector3.right * (side * .18f), .31f, m.Concrete);
                     Panel("Guard upright", loader, new Vector3(side * .7f, 1.47f, z * .74f), new Vector3(.13f, 1.75f, .14f), m.Metal);
                 }
-                Panel("Lift mast rail", loader, new Vector3(side * .51f, 1.28f, -1.04f), new Vector3(.19f, 2.47f, .22f), m.Metal);
+                Panel("Lift mast rail", loader, new Vector3(side * .51f, 1.28f, -1.04f), new Vector3(.19f, 2.47f, .22f), m.Metal, solid: true);
                 Panel("Steel fork", loader, new Vector3(side * .38f, .24f, -1.78f), new Vector3(.18f, .09f, 1.55f), m.Concrete);
             }
             Panel("Fork carriage", loader, new Vector3(0, .63f, -1.17f), new Vector3(1.28f, .57f, .18f), m.Concrete);
@@ -134,7 +134,7 @@ namespace ShiftFour
             {
                 float x = side * 3.98f;
                 Panel("Gantry foot", crane, new Vector3(x, .16f, 0), new Vector3(.68f, .31f, .81f), m.Concrete);
-                Panel("Steel gantry column", crane, new Vector3(x, 3.08f, 0), new Vector3(.40f, 6.16f, .48f), m.Metal);
+                Panel("Steel gantry column", crane, new Vector3(x, 3.08f, 0), new Vector3(.40f, 6.16f, .48f), m.Metal, solid: true);
                 Panel("Column inset", crane, new Vector3(x, 3.24f, -.246f), new Vector3(.17f, 4.12f, .08f), m.Storage);
                 Hazards("Gantry hazard plate", crane, new Vector3(x, 1.08f, -.30f), 4, m);
                 Rod("Gantry brace", crane, new Vector3(x, 4.8f, 0), new Vector3(x - side * 1.17f, 6.05f, 0), .24f, m.Concrete);
@@ -157,21 +157,21 @@ namespace ShiftFour
             float front = -size.z * .5f;
             for (int side = -1; side <= 1; side += 2)
             {
-                Panel("Front wall armor", cladding, new Vector3(side * 10.72f, 5.10f, front - .16f), new Vector3(8.51f, 9.45f, .4f), m.Concrete);
-                Panel("Reinforced corner", cladding, new Vector3(side * 14.62f, 5.16f, front - .39f), new Vector3(1.16f, 10.24f, .88f), m.Metal);
+                Panel("Front wall armor", cladding, new Vector3(side * 10.72f, 5.10f, front - .16f), new Vector3(8.51f, 9.45f, .4f), m.Concrete, solid: true);
+                Panel("Reinforced corner", cladding, new Vector3(side * 14.62f, 5.16f, front - .39f), new Vector3(1.16f, 10.24f, .88f), m.Metal, solid: true);
                 Panel("Corner wear plate", cladding, new Vector3(side * 14.62f, 4.18f, front - .86f), new Vector3(.57f, 6.3f, .15f), m.Storage);
                 Transform wall = Group(side < 0 ? "Avenue wall" : "Service wall", cladding, Vector3.right * (side * size.x * .5f));
                 wall.localRotation = Quaternion.Euler(0, -side * 90f, 0);
                 for (int bay = -1; bay <= 1; bay++)
                 {
                     float x = bay * 7.88f;
-                    Panel("Warehouse wall panel", wall, new Vector3(x, 5.5f, -.18f), new Vector3(7.63f, 8.57f, .43f), m.Concrete);
+                    Panel("Warehouse wall panel", wall, new Vector3(x, 5.5f, -.18f), new Vector3(7.63f, 8.57f, .43f), m.Concrete, solid: true);
                     Panel("Upper panel seam", wall, new Vector3(x, 6.41f, -.43f), new Vector3(7.44f, .18f, .14f), m.Metal);
-                    Panel("Structural pilaster", wall, new Vector3(x - 3.82f, 5.14f, -.36f), new Vector3(.49f, 10.26f, .67f), m.Metal);
+                    Panel("Structural pilaster", wall, new Vector3(x - 3.82f, 5.14f, -.36f), new Vector3(.49f, 10.26f, .67f), m.Metal, solid: true);
                 }
-                Panel("Dark base rail", wall, new Vector3(0, 1.37f, -.45f), new Vector3(23.45f, .52f, .39f), m.Metal);
+                Panel("Dark base rail", wall, new Vector3(0, 1.37f, -.45f), new Vector3(23.45f, .52f, .39f), m.Metal, solid: true);
                 Rod("Surface conduit", wall, new Vector3(-9.7f, 2.22f, -.51f), new Vector3(9.95f, 2.22f, -.51f), .21f, m.Wall);
-                Panel("Utility box", wall, new Vector3(9.48f, 1.52f, -.61f), new Vector3(1.81f, 1.45f, .69f), m.Metal);
+                Panel("Utility box", wall, new Vector3(9.48f, 1.52f, -.61f), new Vector3(1.81f, 1.45f, .69f), m.Metal, solid: true);
                 Lamp("Utility indicator", wall, new Vector3(9.7f, 1.74f, -.97f), new Vector3(.34f, .1f, .07f), signal, amber);
                 if (side < 0)
                 {
@@ -182,7 +182,7 @@ namespace ShiftFour
             }
             Transform generator = Group("Exterior generator housing", cladding, new Vector3(size.x * .5f, 0, 7.62f));
             generator.localRotation = Quaternion.Euler(0, -90, 0);
-            Panel("Generator cabinet", generator, new Vector3(0, 1.08f, -.51f), new Vector3(3.31f, 2.15f, .87f), m.Metal);
+            Panel("Generator cabinet", generator, new Vector3(0, 1.08f, -.51f), new Vector3(3.31f, 2.15f, .87f), m.Metal, solid: true);
             Panel("Generator vent panel", generator, new Vector3(0, 1.14f, -.97f), new Vector3(2.88f, 1.63f, .10f), m.Storage);
             for (int louver = 0; louver < 5; louver++)
                 Panel("Generator louver", generator, new Vector3(.26f, .63f + louver * .22f, -1.04f), new Vector3(2.09f, .08f, .075f), m.Metal);
@@ -242,8 +242,8 @@ namespace ShiftFour
             renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         }
 
-        private static Transform Panel(string name, Transform parent, Vector3 position, Vector3 size, Material material)
-            => Box(name, parent, position, size, material, false).transform;
+        private static Transform Panel(string name, Transform parent, Vector3 position, Vector3 size, Material material, bool solid = false)
+            => Box(name, parent, position, size, material, solid).transform;
 
         private static void Rod(string name, Transform parent, Vector3 start, Vector3 end, float diameter, Material material)
         {

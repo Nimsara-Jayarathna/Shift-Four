@@ -371,6 +371,8 @@ namespace ShiftFour
             Awareness?.Disable();
             if (Hearing != null) Hearing.enabled = false;
             motor.Stop();
+            // Generated drones leave avoidance immediately. The separate wreck keeps its physics rig.
+            if (outdoorPatrol != null && TryGetComponent(out UnityEngine.AI.NavMeshAgent agent)) agent.enabled = false;
             foreach (Collider body in GetComponentsInChildren<Collider>()) body.enabled = false;
             OnDefeated();
             if (outdoorPatrol == null) GameSession.Instance?.DroneDestroyed(this);

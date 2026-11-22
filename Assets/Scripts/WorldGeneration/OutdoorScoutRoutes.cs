@@ -43,21 +43,26 @@ namespace ShiftFour
                 Vector3[] result = TryLoop(lane, index == 0);
                 if (result != null) return result;
             }
-            return index == 6 ? FindEastPerimeterLoop(zone.center.y) : null;
+            return index switch
+            {
+                2 => FindPerimeterLoop(zone.center.y, -1),
+                6 => FindPerimeterLoop(zone.center.y, 1),
+                _ => null
+            };
         }
 
-        private Vector3[] FindEastPerimeterLoop(float grove)
+        private Vector3[] FindPerimeterLoop(float grove, int side)
         {
-            // Use shorter circuits in the same east-side region when a densely wooded
-            // seed cannot fit a full circuit around its closest grove.
+            // Keep the patrol near its grove when scenery or facade projections narrow the original circuit.
             for (int band = 0; band < 4; band++)
             for (int row = 0; row < 15; row++)
             {
                 int step = (row + 1) / 2 * (row % 2 == 0 ? 1 : -1);
                 float depth = grove + step * 8f;
                 if (Mathf.Abs(depth) > boundary - 12f) continue;
-                float east = boundary - 5f - band * 5.3f;
-                var lane = Rect.MinMaxRect(east - 5f, depth - 5.5f, east, depth + 5.5f);
+                float edge = side * (boundary - 5f - band * 5.3f);
+                float inner = edge - side * 5f;
+                var lane = Rect.MinMaxRect(Mathf.Min(edge, inner), depth - 5.5f, Mathf.Max(edge, inner), depth + 5.5f);
                 Vector3[] result = TryLoop(lane, false);
                 if (result != null) return result;
             }

@@ -39,7 +39,7 @@ namespace ShiftFour
             Accent("Lower sign light", entrance, new Vector3(0, 7f, -1.39f), new Vector3(16.5f, .10f, .075f), signal, red);
             Label("CONTROL CENTER 03", entrance, new Vector3(0, 8.01f, -1.4f), .94f, font, 15.8f, 1.29f, m.Lettering);
 
-            Panel("Portal lintel", entrance, new Vector3(0, 4.65f, -.78f), new Vector3(6.7f, 1.18f, 1.38f), m.Concrete);
+            Panel("Portal lintel", entrance, new Vector3(0, 4.65f, -.78f), new Vector3(6.7f, 1.18f, 1.38f), m.Concrete, solid: true);
             Panel("Header insert", entrance, new Vector3(0, 4.7f, -1.49f), new Vector3(5.26f, .78f, .08f), m.Metal);
             Label("OPERATIONS ACCESS", entrance, new Vector3(0, 4.79f, -1.55f), .25f, font, 4.9f, .31f, m.Lettering);
             Accent("Lintel strip", entrance, new Vector3(0, 4.45f, -1.55f), new Vector3(4.85f, .10f, .07f), signal, red);
@@ -48,7 +48,7 @@ namespace ShiftFour
             {
                 // The inner sides of the new jambs stay outside the existing four-metre doorway.
                 float jamb = side * 2.74f;
-                Panel("Reinforced portal column", entrance, new Vector3(jamb, 2.29f, -.72f), new Vector3(1.16f, 4.58f, 1.3f), m.Concrete);
+                Panel("Reinforced portal column", entrance, new Vector3(jamb, 2.29f, -.72f), new Vector3(1.16f, 4.58f, 1.3f), m.Concrete, solid: true);
                 Panel("Portal inset", entrance, new Vector3(jamb, 2.29f, -1.40f), new Vector3(.82f, 4.25f, .14f), m.Metal);
                 Accent("Red jamb light", entrance, new Vector3(jamb, 2.54f, -1.50f), new Vector3(.135f, 2.65f, .09f), signal, red);
                 for (int stripe = 0; stripe < 3; stripe++)
@@ -75,8 +75,8 @@ namespace ShiftFour
                 Accent("Camera indicator", camera, new Vector3(.19f, -.21f, -1.23f), Vector3.one * .07f, signal, red);
 
                 Transform barrier = Group("Facade security barrier", entrance, new Vector3(side * 8.35f, 0, -1.28f));
-                Panel("Armored barrier foot", barrier, new Vector3(0, .28f, 0), new Vector3(4.4f, .56f, 1.04f), m.Concrete);
-                Panel("Armored barrier rail", barrier, new Vector3(0, .79f, .02f), new Vector3(3.96f, .71f, .78f), m.Metal);
+                Panel("Armored barrier foot", barrier, new Vector3(0, .28f, 0), new Vector3(4.4f, .56f, 1.04f), m.Concrete, solid: true);
+                Panel("Armored barrier rail", barrier, new Vector3(0, .79f, .02f), new Vector3(3.96f, .71f, .78f), m.Metal, solid: true);
                 Panel("Barrier warning strip", barrier, new Vector3(0, .93f, -.39f), new Vector3(3.35f, .125f, .06f), m.Checkpoint);
 
                 AddBeacon(entrance, new Vector3(side * 3.6f, 4.26f, -1.18f), m, signal, beacons);
@@ -96,9 +96,9 @@ namespace ShiftFour
             {
                 float x = side * 9.25f;
                 Panel("Front armor plate", cladding, new Vector3(x, 6.1f, front - .2f),
-                    new Vector3(7.05f, 11.7f, .45f), m.Wall);
+                    new Vector3(7.05f, 11.7f, .45f), m.Wall, solid: true);
                 Panel("Corner column", cladding, new Vector3(side * 12.55f, 6.04f, front - .53f),
-                    new Vector3(1.12f, 12.15f, 1.04f), m.Metal);
+                    new Vector3(1.12f, 12.15f, 1.04f), m.Metal, solid: true);
                 Panel("Corner reinforcement", cladding, new Vector3(side * 12.55f, 6.18f, front - 1.07f),
                     new Vector3(.51f, 10.65f, .24f), m.Concrete);
                 Panel("Front panel joint", cladding, new Vector3(x, 9.64f, front - .45f), new Vector3(6.3f, .17f, .11f), m.Metal);
@@ -111,7 +111,7 @@ namespace ShiftFour
                     float bayX = bay * 8.46f;
                     Panel("Side armor plate", sideWall, new Vector3(bayX, 7.9f, -.17f), new Vector3(8.16f, 7.87f, .43f), m.Wall);
                     Panel("Side panel reveal", sideWall, new Vector3(bayX, 6.47f, -.41f), new Vector3(8.13f, .19f, .13f), m.Metal);
-                    Panel("Support brace", sideWall, new Vector3(bayX - 4.18f, 5.99f, -.45f), new Vector3(.53f, 11.98f, .83f), m.Metal);
+                    Panel("Support brace", sideWall, new Vector3(bayX - 4.18f, 5.99f, -.45f), new Vector3(.53f, 11.98f, .83f), m.Metal, solid: true);
                 }
                 for (int cable = 0; cable < 2; cable++)
                 {
@@ -122,7 +122,7 @@ namespace ShiftFour
                         new Vector3(10.7f, y + 1.02f, -.59f), .19f, m.Concrete);
                 }
                 Panel("Electrical service cabinet", sideWall, new Vector3(-8.4f, 1.02f, -.56f),
-                    new Vector3(2.2f, 2.04f, .85f), m.Metal);
+                    new Vector3(2.2f, 2.04f, .85f), m.Metal, solid: true);
                 Panel("Cabinet cover", sideWall, new Vector3(-8.4f, 1.03f, -1.02f), new Vector3(1.84f, 1.72f, .11f), m.Concrete);
                 Accent("Cabinet indicator", sideWall, new Vector3(-8.87f, 1.68f, -1.09f),
                     new Vector3(.39f, .12f, .05f), signal, red);
@@ -229,8 +229,8 @@ namespace ShiftFour
             renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         }
 
-        private static Transform Panel(string name, Transform parent, Vector3 center, Vector3 dimensions, Material material)
-            => Box(name, parent, center, dimensions, material, false).transform;
+        private static Transform Panel(string name, Transform parent, Vector3 center, Vector3 dimensions, Material material, bool solid = false)
+            => Box(name, parent, center, dimensions, material, solid).transform;
 
         private static void Beam(string name, Transform parent, Vector3 start, Vector3 end, float width, Material material)
         {

@@ -202,7 +202,7 @@ namespace ShiftFour
                 float trees = Mathf.Clamp(treeDensity, 0, 1.5f);
                 Scatter(environment, random, usable, density, reserved, trees, layoutSeed);
                 environment.gameObject.AddComponent<OutdoorScenery>().Build(layoutSeed, size, trees,
-                    Mathf.Clamp(grassDensity, 0, 2), sceneryDetail, reserved, materials.Foliage);
+                    Mathf.Clamp(grassDensity, 0, 2), sceneryDetail, reserved, materials);
             }
             catch (Exception exception)
             {
@@ -427,9 +427,13 @@ namespace ShiftFour
                     }
                     else if (kind == 1)
                     {
-                        var rock = Sphere("Rock", rocks, position + Vector3.up * .8f, new Vector3(3.2f, 2, 2.8f), materials.Rock);
-                        rock.GetComponent<MeshRenderer>().enabled = false;
-                        rock.transform.localRotation = Quaternion.Euler(12, Between(random, 0, 360), 9);
+                        var rock = Group("Rock", rocks, position + Vector3.up * .8f);
+                        var solid = rock.gameObject.AddComponent<CapsuleCollider>();
+                        solid.center = Vector3.up * .04f;
+                        solid.radius = .99f;
+                        solid.height = 2.2f;
+                        // Keep the seeded prop layout sequence, including the original rock yaw draw.
+                        _ = random.NextDouble();
                     }
                     else
                     {
@@ -491,7 +495,7 @@ namespace ShiftFour
                 if (enabled) body.enabled = false;
                 body.transform.position = spawn.position;
                 if (enabled) body.enabled = true;
-                body.GetComponent<PlayerController>()?.ApplyCameraPose();
+                body.GetComponent<PlayerController>()?.ResetSpawnMotion();
             }
             BindMissions(layout);
             Physics.SyncTransforms();

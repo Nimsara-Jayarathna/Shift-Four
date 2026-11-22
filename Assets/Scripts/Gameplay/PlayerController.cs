@@ -62,6 +62,14 @@ namespace ShiftFour
             if (deathPresentation != null) deathPresentation.ApplyPose(view, view.transform.position);
         }
 
+        internal void ResetSpawnMotion()
+        {
+            verticalSpeed = 0f;
+            suitableGround = false;
+            movementNoise?.Reset();
+            ApplyCameraPose();
+        }
+
         private void OnValidate()
         {
             ValidateMovement();

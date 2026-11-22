@@ -9,6 +9,7 @@ namespace ShiftFour
     public sealed class OutdoorScenery : MonoBehaviour
     {
         public enum Detail { Low, Standard }
+        internal static readonly Vector3 BoulderSize = new Vector3(1.6f, 1.9f, 1.4f);
 
         private readonly List<Mesh> ownedMeshes = new List<Mesh>();
 
@@ -27,8 +28,9 @@ namespace ShiftFour
         }
 
         internal void Build(int seed, float size, float treeDensity, float grassDensity, Detail detail,
-            List<Rect> occupied, Material material)
+            List<Rect> occupied, PrototypeMaterials materials)
         {
+            Material material = materials.Foliage;
             var skyline = new Batch();
             var timber = new Batch();
             var stones = new Batch();
@@ -62,8 +64,9 @@ namespace ShiftFour
             Publish(timber, material, "Facility conifers");
             foreach (Transform rock in transform.Find("Rocks"))
             {
-                Boulder(stones, random, rock.localPosition - Vector3.up * .75f, new Vector3(1.6f, 1.9f, 1.4f));
+                Boulder(stones, random, rock.localPosition - Vector3.up * .75f, BoulderSize);
             }
+            BuildFenceInfill(materials.Metal);
 
             // Start the landform beyond the fence. A low saddle frames the extraction road to the south.
             for (int side = 0; side < 4; side++)
@@ -161,6 +164,29 @@ namespace ShiftFour
             for (int i = 0; i < meadow.Length; i++)
                 Publish(meadow[i], material, "Grasses and shrubs " + (i + 1), false);
             Publish(stones, material, "Boulders and scree");
+        }
+
+        private void BuildFenceInfill(Material metal)
+        {
+            // Make the solid perimeter visible between the existing rails in one render mesh.
+            var infill = new Batch();
+            foreach (Transform fence in transform.Find("Fences"))
+            {
+                var barrier = fence.GetComponent<BoxCollider>();
+                int bars = Mathf.CeilToInt(barrier.size.x / .42f);
+                for (int i = 0; i < bars; i++)
+                {
+                    float x = barrier.size.x * ((i + .5f) / bars - .5f);
+                    Vector3 left = fence.localPosition + fence.localRotation * new Vector3(x - .016f, .16f, 0);
+                    Vector3 right = left + fence.localRotation * (Vector3.right * .032f);
+                    Vector3 height = Vector3.up * 2.18f;
+                    infill.Face(left, left + height, right, Color.gray);
+                    infill.Face(right, left + height, right + height, Color.gray);
+                    infill.Face(right, left + height, left, Color.gray);
+                    infill.Face(right + height, left + height, right, Color.gray);
+                }
+            }
+            Publish(infill, metal, "Perimeter fence infill", false);
         }
 
         private static float Range(Random r, float min, float max) => Mathf.Lerp(min, max, (float)r.NextDouble());

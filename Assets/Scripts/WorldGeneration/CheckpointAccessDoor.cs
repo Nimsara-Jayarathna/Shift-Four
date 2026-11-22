@@ -44,7 +44,8 @@ namespace ShiftFour
             door.right = BuildPanel(root, .995f, m);
 
             Material signal = m.CheckpointSignal != null ? m.CheckpointSignal : m.Marking;
-            Box("Lock reader housing", root, new Vector3(2.77f, 1.59f, -1.30f), new Vector3(.49f, .65f, .18f), m.Metal, false);
+            // Give the reader its own raycast target beside the moving shutter and its barrier.
+            Box("Lock reader housing", root, new Vector3(2.77f, 1.59f, -1.30f), new Vector3(.49f, .65f, .18f), m.Metal);
             door.indicator = Box("Door lock indicator", root, new Vector3(2.77f, 1.72f, -1.41f),
                 new Vector3(.25f, .28f, .08f), signal, false).GetComponent<Renderer>();
             Label("ACCESS", root, new Vector3(2.77f, 1.44f, -1.41f), .093f, font, .42f, .10f, m.Lettering);

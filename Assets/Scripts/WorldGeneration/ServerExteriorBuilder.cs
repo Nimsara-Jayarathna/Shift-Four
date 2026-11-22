@@ -27,7 +27,7 @@ namespace ShiftFour
                     Panel("Armor panel", wall, new Vector3(x, 11.5f, -.16f), new Vector3(4.82f, 7.8f, .4f), m.Wall);
                     Panel("Panel seam", wall, new Vector3(x, 12.86f, -.39f), new Vector3(4.82f, .12f, .1f), m.Metal);
                     Panel("Glazing strip", wall, new Vector3(x, 5.8f, -.21f), new Vector3(4.83f, 2.7f, .43f), m.Glass);
-                    Panel("Vertical support", wall, new Vector3(x + 2.44f, 7.35f, -.43f), new Vector3(.47f, 14.7f, .81f), m.Concrete);
+                    Panel("Vertical support", wall, new Vector3(x + 2.44f, 7.35f, -.43f), new Vector3(.47f, 14.7f, .81f), m.Concrete, solid: true);
                 }
 
                 Panel("Side sill", wall, new Vector3(0, 3.94f, -.39f), new Vector3(25.6f, .53f, .6f), m.Server);
@@ -39,7 +39,7 @@ namespace ShiftFour
                     Pipe("Vertical return", wall, new Vector3(10.75f, y, -.59f), new Vector3(10.75f, y + 1.45f, -.59f), .23f, m.Concrete);
                 }
 
-                Panel("Service cabinet", wall, new Vector3(-7.7f, 1.2f, -.53f), new Vector3(2.3f, 2.2f, .8f), m.Metal);
+                Panel("Service cabinet", wall, new Vector3(-7.7f, 1.2f, -.53f), new Vector3(2.3f, 2.2f, .8f), m.Metal, solid: true);
                 Panel("Cabinet face", wall, new Vector3(-7.7f, 1.24f, -.95f), new Vector3(1.97f, 1.88f, .10f), m.Server);
                 Panel("Cabinet status", wall, new Vector3(-7.32f, 1.9f, -1.01f), new Vector3(.57f, .09f, .06f), signal);
 
@@ -47,7 +47,7 @@ namespace ShiftFour
                 Panel("Front armor panel", cladding, new Vector3(facadeX, 12.35f, front - .19f),
                     new Vector3(10.38f, 6.45f, .48f), m.Wall);
                 Panel("Vertical corner pier", cladding, new Vector3(side * 11.75f, 7.9f, front - .47f),
-                    new Vector3(.87f, 15.8f, .93f), m.Concrete);
+                    new Vector3(.87f, 15.8f, .93f), m.Concrete, solid: true);
                 Panel("Inset louver surround", cladding, new Vector3(facadeX, 12.33f, front - .47f),
                     new Vector3(8.45f, 3.76f, .42f), m.Metal);
                 for (int slat = 0; slat < 5; slat++)
@@ -72,7 +72,7 @@ namespace ShiftFour
                 .93f, font, 15.9f, 1.24f, m.Lettering);
             Panel("Upper fascia light", entrance, new Vector3(0, 9.17f, -1.45f), new Vector3(16.25f, .12f, .1f), signal);
             Panel("Lower fascia light", entrance, new Vector3(0, 6.98f, -1.45f), new Vector3(16.25f, .10f, .1f), signal);
-            Panel("Reinforced header", entrance, new Vector3(0, 4.56f, -.59f), new Vector3(6.55f, 1.1f, 1.23f), m.Concrete);
+            Panel("Reinforced header", entrance, new Vector3(0, 4.56f, -.59f), new Vector3(6.55f, 1.1f, 1.23f), m.Concrete, solid: true);
             Panel("Header light", entrance, new Vector3(0, 4.31f, -1.23f), new Vector3(3.8f, .11f, .08f), signal);
             Label("DATA & RESEARCH", entrance, new Vector3(0, 4.71f, -1.22f),
                 .32f, font, 4.45f, .35f, m.Lettering);
@@ -80,7 +80,7 @@ namespace ShiftFour
             for (int side = -1; side <= 1; side += 2)
             {
                 // The center 4 m opening stays clear. Markings sit on the existing landing and approach.
-                Panel("Reinforced jamb", entrance, new Vector3(side * 2.69f, 2.2f, -.53f), new Vector3(1.07f, 4.4f, 1.12f), m.Concrete);
+                Panel("Reinforced jamb", entrance, new Vector3(side * 2.69f, 2.2f, -.53f), new Vector3(1.07f, 4.4f, 1.12f), m.Concrete, solid: true);
                 Panel("Jamb recess", entrance, new Vector3(side * 2.69f, 2.2f, -1.13f), new Vector3(.69f, 3.82f, .14f), m.Metal);
                 Panel("Cyan entrance strip", entrance, new Vector3(side * 2.69f, 2.35f, -1.22f), new Vector3(.14f, 2.9f, .07f), signal);
                 Panel("Safety panel", entrance, new Vector3(side * 2.69f, .65f, -1.23f), new Vector3(.62f, .7f, .10f), m.Metal);
@@ -184,8 +184,8 @@ namespace ShiftFour
             Label("SERVER FACILITY 02", plate, Vector3.back * .35f, .88f, font, 14.8f, 1.25f, m.Lettering);
         }
 
-        private static Transform Panel(string name, Transform parent, Vector3 center, Vector3 dimensions, Material material)
-            => Box(name, parent, center, dimensions, material, false).transform;
+        private static Transform Panel(string name, Transform parent, Vector3 center, Vector3 dimensions, Material material, bool solid = false)
+            => Box(name, parent, center, dimensions, material, solid).transform;
 
         private static void Pipe(string name, Transform parent, Vector3 start, Vector3 end, float diameter, Material material)
         {
