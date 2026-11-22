@@ -49540,7 +49540,6 @@ MonoBehaviour:
     Control: {fileID: 2100000, guid: 5e7108b84edbe41dbb311984ab501011, type: 2}
     Storage: {fileID: 2100000, guid: dacbaa3456ffa4da0935fcb4919c3514, type: 2}
     ServerRack: {fileID: 2798216232755636875, guid: 46446e8fbdcf4476383dd8362accac18, type: 3}
-    CheckpointExterior: {fileID: 919132149155446097, guid: ba45bb4be80642cea73b5027d6979eb0, type: 3}
     Lettering: {fileID: 2100000, guid: fa0bd65c63826f44d94e774559f12899, type: 2}
     CheckpointSignal: {fileID: 2100000, guid: 3dd5e50ba54e644faba499f267df5743, type: 2}
   generatedContent: {fileID: 0}

@@ -146,6 +146,12 @@ namespace ShiftFour
             ResetPlayer(next);
             MarkSceneDirty();
             Debug.Log($"Open World: generated seed {layoutSeed} ({size} × {size} m).", this);
+            var exterior = next.Find("Buildings/Checkpoint/ExteriorDetails");
+            if (exterior != null)
+                Debug.Log($"Open World Checkpoint exterior: activated {exterior.GetComponentsInChildren<Transform>().Length - 1} objects " +
+                    $"with {exterior.GetComponentsInChildren<Renderer>().Length} renderers at {exterior.position}, seed {layoutSeed}, scene {gameObject.scene.path}.", exterior);
+            else
+                Debug.LogWarning($"Open World Checkpoint exterior: ExteriorDetails is missing on seed {layoutSeed}.", next);
             if (Application.isPlaying)
             {
                 var player = spawn.GetComponentInChildren<PlayerController>();

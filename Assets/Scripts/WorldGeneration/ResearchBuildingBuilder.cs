@@ -41,7 +41,7 @@ namespace ShiftFour
             Box("Roof cap", root, Vector3.up * (size.y + .25f), new Vector3(size.x + 1, .5f, size.z + 1), m.Metal);
             Box("Identity band", root, new Vector3(0, size.y - 1.5f, front - .12f), new Vector3(size.x + .1f, 2, .18f), m.Metal, false);
             Box("Accent lintel", root, new Vector3(0, size.y - .35f, front - .2f), new Vector3(size.x, .16f, .22f), accent, false);
-            if (type != 0 || m.CheckpointExterior == null)
+            if (type != 0)
                 Label(name.ToUpperInvariant(), root, new Vector3(0, size.y - 1.45f, front - .24f), .48f, font, size.x - 3, 1.8f, m.Lettering);
             Box("Entrance sign", root, new Vector3(0, 4.5f, front - .18f), new Vector3(15, .9f, .18f), m.Metal, false);
             Label(subtitle, root, new Vector3(0, 4.5f, front - .3f), .19f, font, 14, .6f, m.Lettering);
@@ -98,34 +98,86 @@ namespace ShiftFour
             }
             Box("Roof equipment", root, new Vector3(-6, size.y + 1, 3), new Vector3(5, 1.5f, 5), m.Concrete);
 
-            if (m.CheckpointExterior == null)
+            // Resolve the imported model itself by path. A scene reference to an imported object
+            // can deserialize as missing even when the FBX is present.
+            var model = Resources.Load<GameObject>("SF_CheckpointExterior");
+            Transform exterior = Group("ExteriorDetails", root);
+            if (model != null)
+                Object.Instantiate(model, exterior, false).name = "Armored shell";
+            else
             {
-                Debug.LogWarning("Open World: Checkpoint exterior model is missing from the prototype palette.", root);
-                return;
+                Debug.LogWarning("Open World Checkpoint exterior: SF_CheckpointExterior is missing. Using built-in exterior geometry.", exterior);
+                BuildCheckpointExteriorFallback(exterior, size, front, m);
             }
 
-            // The model is authored in the existing 24 m shell's local coordinates. Its mesh parts
-            // share project materials and have no colliders, including the guards beside the apron.
-            Transform exterior = Object.Instantiate(m.CheckpointExterior, root, false).transform;
-            exterior.name = "ExteriorDetails";
-            Label("CHECKPOINT 01", exterior, new Vector3(0, 6.27f, front - 6.51f), .8f, font, 13.82f, 1.23f, m.Lettering);
-            var sideSign = Label("CHECKPOINT 01", exterior, new Vector3(size.x * .5f + 1.22f, 7.64f, 0),
+            Label("CHECKPOINT 01", exterior, new Vector3(0, 6.27f, front - 6.54f), .85f, font, 13.82f, 1.42f, m.Lettering);
+            var sideSign = Label("CHECKPOINT 01", exterior, new Vector3(size.x * .5f + 1.31f, 7.64f, 0),
                 .85f, font, 12.65f, 1.85f, m.Lettering);
             sideSign.transform.localRotation = Quaternion.Euler(0, -90, 0);
             Label("SECURITY INTAKE", exterior, new Vector3(0, 4.83f, front - 1.33f),
                 .22f, font, 4.3f, .27f, m.Lettering);
 
+            Material signal = m.CheckpointSignal != null ? m.CheckpointSignal : m.Marking;
+            var markerTint = new MaterialPropertyBlock();
+            markerTint.SetColor("_BaseColor", new Color(1f, .83f, .05f));
+            Transform marker = Group("Temporary exterior test marker", exterior, new Vector3(0, 8.18f, front - 6.52f));
+            var back = Box("Yellow marker board", marker, Vector3.zero, new Vector3(13.4f, 1.32f, .2f), signal, false);
+            back.GetComponent<Renderer>().SetPropertyBlock(markerTint);
+            var text = Label("TEST EXTERIOR UPGRADE", marker, new Vector3(0, 0, -.12f),
+                .64f, font, 12.8f, .96f, m.Lettering);
+            var markerText = text.GetComponent<Renderer>();
+            markerText.GetPropertyBlock(markerTint);
+            markerTint.SetColor("_BaseColor", new Color(.07f, .06f, .03f));
+            markerText.SetPropertyBlock(markerTint);
+            markerTint.Clear();
+
             for (int side = -1; side <= 1; side += 2)
             {
                 bool red = side < 0;
+                Color color = red ? new Color(1, .13f, .09f) : new Color(.83f, .94f, 1);
+                var lens = Box(red ? "Red warning lens" : "White inspection lens", exterior,
+                    new Vector3(side * 3.72f, red ? 3.78f : 3.29f, front - .996f),
+                    new Vector3(.38f, red ? .38f : .22f, .12f), signal, false);
+                markerTint.SetColor("_BaseColor", color);
+                lens.GetComponent<Renderer>().SetPropertyBlock(markerTint);
+
                 var lamp = Group(red ? "Red warning light" : "White inspection light", exterior,
-                    new Vector3(side * 3.72f, red ? 3.78f : 3.29f, front - 1.1f)).gameObject.AddComponent<Light>();
+                    lens.transform.localPosition + Vector3.back * .12f).gameObject.AddComponent<Light>();
                 lamp.type = LightType.Point;
-                lamp.color = red ? new Color(1, .13f, .09f) : new Color(.83f, .94f, 1);
+                lamp.color = color;
                 lamp.range = 3.4f;
                 lamp.intensity = 3.2f;
                 lamp.shadows = LightShadows.None;
             }
+        }
+
+        private static void BuildCheckpointExteriorFallback(Transform exterior, Vector3 size, float front, PrototypeMaterials m)
+        {
+            Material signal = m.CheckpointSignal != null ? m.CheckpointSignal : m.Marking;
+            Box("Entrance fascia", exterior, new Vector3(0, 6.27f, front - 6.21f),
+                new Vector3(16f, 1.78f, .6f), m.Metal, false);
+            Box("Fascia light strip", exterior, new Vector3(0, 6.98f, front - 6.53f),
+                new Vector3(15f, .10f, .09f), signal, false);
+            Box("Avenue sign panel", exterior, new Vector3(size.x * .5f + 1.1f, 7.64f, 0),
+                new Vector3(.35f, 2.5f, 14f), m.Metal, false);
+
+            for (int side = -1; side <= 1; side += 2)
+            {
+                Box("Armored jamb", exterior, new Vector3(side * 2.73f, 2.22f, front - .66f),
+                    new Vector3(1.02f, 4.4f, 1f), m.Metal, false);
+                Box("Entrance light strip", exterior, new Vector3(side * 2.73f, 2.22f, front - 1.18f),
+                    new Vector3(.14f, 3.2f, .08f), signal, false);
+                Box("Reinforced barrier", exterior, new Vector3(side * 9.15f, .53f, front - 1.05f),
+                    new Vector3(4.5f, 1f, .66f), m.Metal, false);
+                Box("Barrier amber trim", exterior, new Vector3(side * 9.15f, .53f, front - 1.4f),
+                    new Vector3(1.6f, .19f, .06f), m.Checkpoint, false);
+                Box("Rooftop vent housing", exterior, new Vector3(side * 3.2f, size.y + 2.15f, 2.6f),
+                    new Vector3(4.4f, .65f, 3.8f), m.Metal, false);
+                Cylinder("Vent grille", exterior, new Vector3(side * 3.2f, size.y + 2.55f, 2.6f),
+                    2.55f, .18f, m.Concrete, false);
+            }
+
+            Cylinder("Radio mast", exterior, new Vector3(8, size.y + 3.5f, -5.4f), .38f, 6f, m.Metal, false);
         }
 
         private static void Server(Transform root, Vector3 size, float front, Material accent, PrototypeMaterials m)
