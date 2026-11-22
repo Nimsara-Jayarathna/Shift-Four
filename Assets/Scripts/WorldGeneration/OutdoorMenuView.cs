@@ -51,6 +51,15 @@ namespace ShiftFour
             GUI.depth = -100;
             alpha = opacity;
             GUI.color = new Color(1, 1, 1, alpha);
+            if (menu.Screen == OutdoorMissionMenu.ScreenState.Playing || menu.ViewingBriefing)
+            {
+                if (menu.ViewingBriefing) DrawBriefing(menu, w, h, busy);
+                else DrawObjective(menu.Feedback);
+                GUI.matrix = matrix;
+                GUI.color = color;
+                GUI.depth = depth;
+                return;
+            }
             GUI.DrawTexture(new Rect(0, 0, w, h), shade);
             if (menu.Screen == OutdoorMissionMenu.ScreenState.Settings || menu.Screen == OutdoorMissionMenu.ScreenState.Loading)
             {

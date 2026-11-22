@@ -9,9 +9,11 @@ namespace ShiftFour
     {
         internal OutdoorSettings Preferences { get; private set; }
         internal const string ScenePath = "Assets/Scenes/OpenWorldPrototype.unity";
-        public enum ScreenState { Title, Playing, Paused, Settings, Dying, GameOver, Victory, Loading }
+        public enum ScreenState { Title, Playing, Paused, Settings, Dying, GameOver, Victory, Loading, Map, Missions }
         public ScreenState Screen { get; private set; } = ScreenState.Title;
         private ScreenState settingsParent;
+        internal PrototypePlayerFeedback Feedback { get; private set; }
+        internal bool ViewingBriefing => Screen == ScreenState.Map || Screen == ScreenState.Missions;
         private PlayerController player;
         private Health health;
         private OpenWorldMissionManager extraction;
@@ -39,7 +41,8 @@ namespace ShiftFour
             player = actor;
             health = actor.GetComponent<Health>();
             health.Died += OnPlayerDied;
-            BindExtraction(actor.GetComponent<PrototypePlayerFeedback>()?.ExtractionManager);
+            Feedback = actor.GetComponent<PrototypePlayerFeedback>();
+            BindExtraction(Feedback?.ExtractionManager);
             view = actor.ViewCamera;
             Preferences = new OutdoorSettings(actor, GetComponent<WorldGenerator>());
             if (startReloadedMission)
@@ -179,6 +182,8 @@ namespace ShiftFour
             if (Screen == ScreenState.Playing)
             {
                 if (Input.GetKeyDown(KeyCode.Escape)) Pause();
+                else if (Input.GetKeyDown(KeyCode.M)) OpenMap();
+                else if (Input.GetKeyDown(KeyCode.Tab)) OpenMissions();
                 return;
             }
             opacity = Mathf.MoveTowards(opacity, closing ? 0f : 1f, Time.unscaledDeltaTime * 6f);
@@ -198,11 +203,29 @@ namespace ShiftFour
                 }
                 return;
             }
+            if (ViewingBriefing)
+            {
+                if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(Screen == ScreenState.Map ? KeyCode.M : KeyCode.Tab))
+                    Play();
+                return;
+            }
             if (Input.GetKeyDown(KeyCode.Escape))
             {
                 if (Screen == ScreenState.Settings) Back();
                 else if (Screen == ScreenState.Paused) Play();
             }
+        }
+
+        public void OpenMap() => OpenBriefing(ScreenState.Map);
+        public void OpenMissions() => OpenBriefing(ScreenState.Missions);
+
+        private void OpenBriefing(ScreenState screen)
+        {
+            if (Screen != ScreenState.Playing || Ended || Feedback == null) return;
+            Freeze();
+            Change(screen);
+            panel.FocusSite(Feedback.CurrentSite);
+            opacity = 0f;
         }
 
         public void Pause()
@@ -215,7 +238,7 @@ namespace ShiftFour
 
         public void Play()
         {
-            if (closing || (Screen != ScreenState.Title && Screen != ScreenState.Paused)) return;
+            if (closing || (Screen != ScreenState.Title && Screen != ScreenState.Paused && !ViewingBriefing)) return;
             closing = true;
             actionFrame = Time.frameCount;
         }
@@ -290,8 +313,9 @@ namespace ShiftFour
 
         private void OnGUI()
         {
-            if (player != null && Screen != ScreenState.Playing && Screen != ScreenState.Dying)
-                panel.Draw(this, opacity, closing || Screen == ScreenState.Loading);
+            if (player == null || Screen == ScreenState.Dying) return;
+            if (Screen == ScreenState.Playing && (Feedback == null || player.MenuBlocksInput || Event.current.type != EventType.Repaint)) return;
+            panel.Draw(this, Screen == ScreenState.Playing ? 1f : opacity, closing || Screen == ScreenState.Loading);
         }
 
         private void OnDisable()

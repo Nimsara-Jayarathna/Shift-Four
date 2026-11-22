@@ -250,7 +250,7 @@ namespace ShiftFour
             if (recovering)
                 Fill(new Rect(49, h - 57, 248 * Mathf.Clamp01(fraction), 2), new Color(.68f, 1, .87f, .4f + .2f * Mathf.Sin(Time.unscaledTime * 5)));
         }
-        internal void DrawPrototypeBars(List<CombatHud.DroneBar> drones)
+        internal void DrawPrototype(List<CombatHud.DroneBar> drones, Health health, float fraction, float trail, bool recovering, WeaponRuntimeState weapon)
         {
             Matrix4x4 previous = GUI.matrix;
             Color previousColor = GUI.color;
@@ -258,6 +258,25 @@ namespace ShiftFour
             GUI.matrix = Matrix4x4.Scale(Vector3.one * scale);
             try
             {
+                float w = Screen.width / scale, h = Screen.height / scale;
+                float y = h - 88f;
+                Color condition = fraction <= .3f ? Red : fraction <= .6f ? new Color(1f, .72f, .28f) : new Color(.42f, .87f, .62f);
+                Panel(new Rect(24, y, 258, 64));
+                Fill(new Rect(38, y + 18, 13, 4), condition);
+                Fill(new Rect(42.5f, y + 13.5f, 4, 13), condition);
+                Label(new Rect(59, y + 6, 136, 26), "PLAYER HEALTH", 13, recovering ? Cyan : White, TextAnchor.MiddleLeft);
+                Label(new Rect(173, y + 5, 94, 28), $"{Mathf.CeilToInt(health.Current)} / {Mathf.CeilToInt(health.Maximum)}", 17, White, TextAnchor.MiddleRight);
+                Fill(new Rect(38, y + 40, 229, 9), Muted * .4f);
+                Fill(new Rect(38, y + 40, 229 * trail, 9), new Color(.96f, .66f, .44f));
+                Fill(new Rect(38, y + 40, 229 * fraction, 9), condition);
+                if (recovering)
+                    Fill(new Rect(38, y + 37, 229 * fraction, 2), Color.Lerp(condition, White, .5f + .3f * Mathf.Sin(Time.unscaledTime * 7f)));
+                Panel(new Rect(w - 186, y, 162, 64));
+                bool reloading = weapon?.ReloadState == WeaponReloadState.Reloading;
+                Label(new Rect(w - 172, y + 6, 134, 21), weapon == null ? "MELEE" : reloading ? "PISTOL    RELOADING" : "PISTOL",
+                    13, reloading ? Cyan : Muted, TextAnchor.MiddleRight);
+                Label(new Rect(w - 172, y + 24, 134, 34), weapon == null ? "KNIFE" : $"{weapon.RoundsInMagazine} / {weapon.ReserveRounds}",
+                    22, weapon?.RoundsInMagazine == 0 ? Red : White, TextAnchor.MiddleRight);
                 foreach (CombatHud.DroneBar bar in drones)
                     if (bar.Visible && bar.Health != null && bar.Health.IsAlive)
                         DrawDroneBar(bar, scale, Screen.width / scale, Screen.height / scale, showName: false);

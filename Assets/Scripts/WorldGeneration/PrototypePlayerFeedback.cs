@@ -6,12 +6,7 @@ namespace ShiftFour
     [RequireComponent(typeof(PlayerController), typeof(GameplayAudio))]
     public sealed class PrototypePlayerFeedback : MonoBehaviour
     {
-        private enum Mission { None, Checkpoint, Server, Control, Storage }
-
-        private static readonly Color CompleteAccent = new Color(.43f, 1f, .59f);
-        private static readonly Color PanelColor = new Color(.045f, .075f, .09f, .96f);
         private PlayerController player;
-        private Health health;
         private CheckpointSecurityScanner checkpoint;
         private ServerNetworkPuzzle server;
         private ControlLockdownMission control;
@@ -25,14 +20,17 @@ namespace ShiftFour
         private BuildingAccessDoor serverDoor, controlDoor, storageDoor;
         private OutdoorPlayerEquipment equipment;
         private CombatHud droneBars;
-        private BoxCollider checkpointFloor, serverFloor, controlFloor, storageFloor;
-        private GUIStyle titleStyle, objectiveStyle, detailStyle;
+        internal FacilityMap Map { get; } = new FacilityMap();
+        private Objective lastObjective;
+        private float updatedUntil;
+        internal bool ObjectiveUpdated => Time.time < updatedUntil;
+
         public OpenWorldMissionManager ExtractionManager => extraction;
 
         internal void SetDroneTargets(DroneBrain[] targets)
         {
             if (player != null) GetComponent<GameplayAudio>().BindFlightLoops(targets);
-            if (droneBars == null && targets.Length > 0) droneBars = gameObject.AddComponent<CombatHud>();
+            if (droneBars == null && !TryGetComponent(out droneBars)) droneBars = gameObject.AddComponent<CombatHud>();
             if (droneBars != null) droneBars.InitializePrototype(GetComponent<PlayerController>(), targets);
         }
 
@@ -44,7 +42,7 @@ namespace ShiftFour
             interceptorDispatch = interceptors;
         }
 
-        internal void SetMissions(Transform buildings, CheckpointSecurityScanner scanner, ServerNetworkPuzzle network,
+        internal void SetMissions(Transform layout, Transform spawn, CheckpointSecurityScanner scanner, ServerNetworkPuzzle network,
             ControlLockdownMission lockdown, StoragePowerMission power, OpenWorldMissionManager finalMission)
         {
             checkpoint = scanner;
@@ -52,10 +50,9 @@ namespace ShiftFour
             control = lockdown;
             storage = power;
             extraction = finalMission;
-            checkpointFloor = FindFloor(buildings, "Checkpoint");
-            serverFloor = FindFloor(buildings, "Server");
-            controlFloor = FindFloor(buildings, "Control");
-            storageFloor = FindFloor(buildings, "Storage");
+            Map.Bind(layout, spawn);
+            lastObjective = default;
+            updatedUntil = 0f;
         }
 
         internal void SetProgression(OutdoorSupplyCache cache, CheckpointAccessDoor door,
@@ -71,7 +68,7 @@ namespace ShiftFour
         private void Start()
         {
             player = GetComponent<PlayerController>();
-            health = GetComponent<Health>();
+            if (droneBars == null) SetDroneTargets(System.Array.Empty<DroneBrain>());
             equipment = GetComponent<OutdoorPlayerEquipment>();
             GetComponent<GameplayAudio>().Initialize(player, null);
         }
@@ -81,8 +78,6 @@ namespace ShiftFour
             if (Event.current.type != EventType.Repaint || player == null || player.MenuBlocksInput) return;
             if (extraction != null && extraction.Escaped) return;
 
-            DrawMissions();
-            if (extraction != null) DrawExtractionTracker();
             if (interceptorDispatch != null && interceptorDispatch.HasWarning)
                 GUI.Box(new Rect((Screen.width - 210f) * .5f, Screen.height * .5f - 138f, 210f, 25f),
                     "INTERCEPTOR RESPONDING");
@@ -121,234 +116,111 @@ namespace ShiftFour
                 }
             }
 
-            var weapon = player.Weapons?.ActiveWeapon;
-            if (health != null)
-                GUI.Box(new Rect(16, Screen.height - 44, 132, 28), $"HP {Mathf.CeilToInt(health.Current)} / {Mathf.CeilToInt(health.Maximum)}");
-            if (weapon == null)
+        }
+
+        internal enum Site { Supply, Checkpoint, Server, Control, Storage, Extraction }
+        internal enum Status { Locked, Available, InProgress, Complete, Unavailable }
+
+        internal readonly struct Objective
+        {
+            internal readonly Site Site;
+            internal readonly Status Status;
+            internal readonly string Instruction;
+            internal readonly int Count, Total;
+
+            internal Objective(Site site, Status status, string instruction, int count = 0, int total = 0)
             {
-                if (equipment != null)
-                {
-                    string knife = equipment.HasSupplies ? "1  Knife    2  Pistol" : "1  Knife";
-                    GUI.Box(new Rect(Screen.width - 166, Screen.height - 44, 150, 28), knife);
-                }
-                return;
+                Site = site;
+                Status = status;
+                Instruction = instruction;
+                Count = count;
+                Total = total;
             }
-            string ammo = $"{weapon.RoundsInMagazine} / {weapon.ReserveRounds}";
-            if (weapon.ReloadState == WeaponReloadState.Reloading) ammo += "  Reloading";
-            else if (equipment != null) ammo = "2  Pistol    " + ammo;
-            GUI.Box(new Rect(Screen.width - 166, Screen.height - 44, 150, 28), ammo);
         }
 
-        private BoxCollider FindFloor(Transform buildings, string room)
+        internal Site CurrentSite
         {
-            var floor = buildings != null ? buildings.Find($"{room}/Foundation")?.GetComponent<BoxCollider>() : null;
-            if (floor == null) Debug.LogWarning($"Open World missions: {room} foundation is missing; HUD room focus is unavailable.", this);
-            return floor;
-        }
-
-        private Mission FocusedMission()
-        {
-            Vector3 feet = transform.position;
-            if (checkpoint != null && checkpoint.isActiveAndEnabled && Inside(checkpointFloor, feet)) return Mission.Checkpoint;
-            if (server != null && server.isActiveAndEnabled && Inside(serverFloor, feet)) return Mission.Server;
-            if (control != null && control.isActiveAndEnabled && Inside(controlFloor, feet)) return Mission.Control;
-            if (storage != null && storage.isActiveAndEnabled && Inside(storageFloor, feet)) return Mission.Storage;
-            return Mission.None;
-        }
-
-        private static bool Inside(BoxCollider floor, Vector3 feet)
-        {
-            if (floor == null || !floor.enabled || !floor.gameObject.activeInHierarchy) return false;
-            Bounds bounds = floor.bounds;
-            if (feet.y < bounds.min.y - .25f || feet.y > bounds.max.y + 4f) return false;
-            feet.y = bounds.center.y;
-            return bounds.Contains(feet);
-        }
-
-        private void DrawMissions()
-        {
-            float scale = Mathf.Clamp(Screen.height / 900f, .75f, 2f);
-            float margin = 16 * scale;
-            float width = Mathf.Min(490 * scale, Screen.width * .47f - margin);
-            float top = margin;
-            var focus = FocusedMission();
-            string headingPrefix = extraction != null && extraction.RegisteredDrones > 0 ? string.Empty : "OPTIONAL ";
-
-            switch (focus)
+            get
             {
-                case Mission.Checkpoint:
-                    top = DrawObjective(top, width, scale, headingPrefix + "CHECKPOINT TASK", checkpoint.Objective,
-                        checkpoint.Hint, checkpoint.Notice, checkpoint.IsComplete, new Color(1f, .82f, .44f), true);
-                    break;
-                case Mission.Server:
-                    top = DrawObjective(top, width, scale, headingPrefix + "SERVER TASK",
-                        server.IsComplete ? ServerNetworkPuzzle.CompletionMessage : server.Objective,
-                        server.IsComplete ? string.Empty : "Read the sequence display inside Server",
-                        server.Notice, server.IsComplete, new Color(.51f, .88f, 1f), server.HasWarning);
-                    break;
-                case Mission.Control:
-                    top = DrawObjective(top, width, scale, headingPrefix + "CONTROL ROOM TASK", control.Objective,
-                        control.Hint, control.Notice, control.IsComplete, new Color(1f, .57f, .49f), true);
-                    break;
-                case Mission.Storage:
-                    top = DrawObjective(top, width, scale, headingPrefix + "STORAGE TASK", storage.Objective,
-                        storage.Hint, storage.Notice, storage.IsComplete, new Color(.91f, .81f, 1f), true);
-                    break;
+                if (supplyCache != null && !supplyCache.IsDiscovered) return Site.Supply;
+                if (checkpoint != null && !checkpoint.IsComplete) return Site.Checkpoint;
+                if (server != null && !server.IsComplete) return Site.Server;
+                if (control != null && !control.IsComplete) return Site.Control;
+                if (storage != null && !storage.IsComplete) return Site.Storage;
+                return Site.Extraction;
             }
-
-            if (focus != Mission.Checkpoint && checkpoint != null && checkpoint.isActiveAndEnabled)
-                top = DrawSummary(top, width, scale, "Checkpoint", checkpoint.Objective, checkpoint.IsComplete);
-            if (focus != Mission.Server && server != null && server.isActiveAndEnabled)
-                top = DrawSummary(top, width, scale, "Server", server.Objective, server.IsComplete);
-            if (focus != Mission.Control && control != null && control.isActiveAndEnabled)
-                top = DrawSummary(top, width, scale, "Control", control.Objective, control.IsComplete);
-            if (focus != Mission.Storage && storage != null && storage.isActiveAndEnabled)
-                top = DrawSummary(top, width, scale, "Storage", storage.Objective, storage.IsComplete);
-
-            if (storageDoor != null || controlDoor != null || serverDoor != null || (supplyCache != null && supplyCache.isActiveAndEnabled))
-                DrawProgression(top, width, scale);
         }
 
-        private void DrawProgression(float top, float width, float scale)
+        internal Objective ReadObjective(Site site)
         {
-            bool storageOpen = storageDoor != null && storageDoor.IsOpen;
-            bool powerRestored = storage != null && storage.IsComplete;
-            bool hasStorageKey = equipment != null && equipment.HasStorageKey;
-            bool controlOpen = controlDoor != null && controlDoor.IsOpen;
-            bool hasControlKey = equipment != null && equipment.HasControlKey;
-            bool hasServerKey = equipment != null && equipment.HasServerKey;
-            bool serverOpen = serverDoor != null && serverDoor.IsOpen;
-            bool checkpointOpen = checkpointDoor != null && checkpointDoor.IsOpen;
-            string objective = powerRestored ? "Storage Power Restored" :
-                storageOpen ? "Restore Storage Power" :
-                hasStorageKey ? "Reach Storage Building" :
-                controlOpen ? "Complete Control Lockdown" :
-                hasControlKey ? "Reach Control Building" :
-                serverOpen ? "Complete Server Hacking" :
-                hasServerKey ? "REACH SERVER BUILDING" :
-                checkpointOpen ? "Complete Checkpoint Security" : supplyCache?.Objective ?? "Reach Checkpoint";
-
-            string notice = storageDoor != null ? storageDoor.Notice : string.Empty;
-            if (string.IsNullOrEmpty(notice) && equipment != null) notice = equipment.StorageKeyNotice;
-            if (string.IsNullOrEmpty(notice) && controlDoor != null) notice = controlDoor.Notice;
-            if (string.IsNullOrEmpty(notice) && equipment != null) notice = equipment.ControlKeyNotice;
-            if (string.IsNullOrEmpty(notice) && serverDoor != null) notice = serverDoor.Notice;
-            if (string.IsNullOrEmpty(notice) && equipment != null) notice = equipment.ServerKeyNotice;
-            if (string.IsNullOrEmpty(notice) && checkpointDoor != null) notice = checkpointDoor.Notice;
-            if (string.IsNullOrEmpty(notice) && supplyCache != null) notice = supplyCache.Notice;
-
-            if (string.IsNullOrEmpty(notice))
-                DrawSummary(top, width, scale, "Progression", objective, powerRestored, showCompletedObjective: true);
-            else
-                DrawObjective(top, width, scale, "PROGRESSION", objective, string.Empty, notice, powerRestored, CompleteAccent,
-                    notice == "CHECKPOINT KEY REQUIRED" || notice == serverDoor?.KeyRequired ||
-                    notice == controlDoor?.KeyRequired || notice == storageDoor?.KeyRequired);
-        }
-
-        private void DrawExtractionTracker()
-        {
-            float scale = Mathf.Clamp(Screen.height / 900f, .75f, 2f);
-            float margin = 16 * scale;
-            float width = Mathf.Min(430 * scale, Screen.width * .47f - margin);
-            float x = Screen.width - width - margin;
-            float inset = 12 * scale;
-            float textWidth = width - 2 * inset;
-            bool ready = extraction.IsReady;
-            Color accent = ready ? CompleteAccent : new Color(1f, .49f, .42f);
-            string heading = ready ? "Extraction Gate: READY" : "Extraction Gate: LOCKED";
-            string counters = $"Building Missions: {extraction.BuildingMissionsCompleted}/{OpenWorldMissionManager.RequiredMissions}\n" +
-                $"Security Drones: {extraction.DronesDefeated}/{OpenWorldMissionManager.RequiredDrones}";
-            string notice = extraction.Notice;
-            string route = extraction.RegisteredDrones == 0 ? "Generate World to spawn the security drones" :
-                "South end of the main avenue, 14 m behind spawn";
-            string detail = string.IsNullOrEmpty(notice) ? route : notice;
-
-            titleStyle ??= new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold };
-            detailStyle ??= new GUIStyle(GUI.skin.label) { wordWrap = true };
-            titleStyle.fontSize = Mathf.RoundToInt(22 * scale);
-            detailStyle.fontSize = Mathf.RoundToInt(20 * scale);
-            titleStyle.normal.textColor = accent;
-            detailStyle.normal.textColor = Color.white;
-            float headingHeight = 30 * scale;
-            float countersHeight = detailStyle.CalcHeight(new GUIContent(counters), textWidth);
-            detailStyle.fontSize = Mathf.RoundToInt(17 * scale);
-            float detailHeight = detailStyle.CalcHeight(new GUIContent(detail), textWidth);
-            DrawBackground(new Rect(x, margin, width, 2 * inset + headingHeight + countersHeight + 7 * scale + detailHeight), accent);
-            float y = margin + inset;
-            GUI.Label(new Rect(x + inset, y, textWidth, headingHeight), heading, titleStyle);
-            y += headingHeight;
-            detailStyle.fontSize = Mathf.RoundToInt(20 * scale);
-            GUI.Label(new Rect(x + inset, y, textWidth, countersHeight), counters, detailStyle);
-            detailStyle.fontSize = Mathf.RoundToInt(17 * scale);
-            detailStyle.normal.textColor = ready ? CompleteAccent : new Color(1f, .85f, .8f);
-            GUI.Label(new Rect(x + inset, y + countersHeight + 7 * scale, textWidth, detailHeight), detail, detailStyle);
-        }
-
-        private float DrawObjective(float top, float width, float scale, string title, string objective, string detail,
-            string notice, bool complete, Color accent, bool warning)
-        {
-            titleStyle ??= new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold };
-            objectiveStyle ??= new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, wordWrap = true };
-            detailStyle ??= new GUIStyle(GUI.skin.label) { wordWrap = true };
-            titleStyle.fontSize = Mathf.RoundToInt(15 * scale);
-            objectiveStyle.fontSize = Mathf.RoundToInt(23 * scale);
-            detailStyle.fontSize = Mathf.RoundToInt(16 * scale);
-            if (complete) accent = CompleteAccent;
-            titleStyle.normal.textColor = accent;
-            objectiveStyle.normal.textColor = complete ? accent : Color.white;
-            detailStyle.normal.textColor = new Color(.83f, .9f, .93f);
-
-            float margin = 16 * scale;
-            float textWidth = width - 30 * scale;
-            float objectiveHeight = objectiveStyle.CalcHeight(new GUIContent(objective), textWidth);
-            float detailHeight = string.IsNullOrEmpty(detail) ? 0 : detailStyle.CalcHeight(new GUIContent(detail), textWidth);
-            float noticeHeight = string.IsNullOrEmpty(notice) ? 0 : detailStyle.CalcHeight(new GUIContent(notice), textWidth);
-            float height = 43 * scale + objectiveHeight + detailHeight + noticeHeight;
-            DrawBackground(new Rect(margin, top, width, height), accent);
-
-            float textX = margin + 16 * scale;
-            float y = top + 9 * scale;
-            GUI.Label(new Rect(textX, y, textWidth, 22 * scale), title, titleStyle);
-            y += 24 * scale;
-            GUI.Label(new Rect(textX, y, textWidth, objectiveHeight), objective, objectiveStyle);
-            y += objectiveHeight;
-            if (detailHeight > 0)
+            switch (site)
             {
-                GUI.Label(new Rect(textX, y, textWidth, detailHeight), detail, detailStyle);
-                y += detailHeight;
+                case Site.Supply when supplyCache != null:
+                    return new(site, supplyCache.IsDiscovered ? Status.Complete : Status.Available,
+                        supplyCache.IsDiscovered ? "Pistol and Checkpoint key collected." : "Locate the supply station and collect your gear.");
+                case Site.Checkpoint when checkpoint != null:
+                    return Building(site, checkpoint.IsComplete, checkpointDoor == null || checkpointDoor.IsOpen,
+                        equipment != null && equipment.HasCheckpointKey, checkpoint.Objective);
+                case Site.Server when server != null:
+                    return Building(site, server.IsComplete, serverDoor == null || serverDoor.IsOpen,
+                        equipment != null && equipment.HasServerKey, "Activate terminals in the displayed order.",
+                        server.OnlineCount, server.TerminalCount);
+                case Site.Control when control != null:
+                    return Building(site, control.IsComplete, controlDoor == null || controlDoor.IsOpen,
+                        equipment != null && equipment.HasControlKey,
+                        control.ActivatedCount == control.TotalSwitches ? "Use the lockdown override panel." : "Activate the lockdown switches.",
+                        control.ActivatedCount, control.TotalSwitches);
+                case Site.Storage when storage != null:
+                    return Building(site, storage.IsComplete, storageDoor == null || storageDoor.IsOpen,
+                        equipment != null && equipment.HasStorageKey,
+                        storage.CollectedCount == storage.TotalCells ? "Restore emergency generator power." : "Collect the two power cells.",
+                        storage.CollectedCount, storage.TotalCells);
+                case Site.Extraction when extraction != null:
+                    return new(site, extraction.Escaped ? Status.Complete : extraction.IsReady ? Status.Available : Status.Locked,
+                        extraction.Escaped ? "Facility escaped." : extraction.IsReady ? "Reach the extraction gate." :
+                        extraction.BuildingMissionsCompleted < OpenWorldMissionManager.RequiredMissions ? "Complete the four building missions." :
+                        "Defeat the designated Scout, Guard and Flanker.", extraction.DronesDefeated, OpenWorldMissionManager.RequiredDrones);
+                default:
+                    return new(site, Status.Unavailable, "Unavailable in this layout.");
             }
-            if (noticeHeight > 0)
+        }
+
+        private static Objective Building(Site site, bool complete, bool open, bool key, string task, int count = 0, int total = 0)
+        {
+            if (complete) return new(site, Status.Complete, "Mission complete.", count, total);
+            if (open) return new(site, Status.InProgress, task, count, total);
+            if (key) return new(site, Status.Available, "Reach the building and unlock its entrance.", count, total);
+            return new(site, Status.Locked, task, count, total);
+        }
+
+        private void LateUpdate()
+        {
+            if (player == null || player.MenuBlocksInput) return;
+            var next = ReadObjective(CurrentSite);
+            if (lastObjective.Instruction != null && (lastObjective.Site != next.Site || lastObjective.Status != next.Status ||
+                lastObjective.Count != next.Count || lastObjective.Instruction != next.Instruction))
+                updatedUntil = Time.time + 2f;
+            lastObjective = next;
+        }
+
+        internal string InteractionNotice
+        {
+            get
             {
-                detailStyle.normal.textColor = warning ? new Color(1f, .43f, .38f) : accent;
-                GUI.Label(new Rect(textX, y, textWidth, noticeHeight), notice, detailStyle);
+                if (extraction != null && !string.IsNullOrEmpty(extraction.Notice)) return extraction.Notice;
+                if (server != null && !string.IsNullOrEmpty(server.Notice)) return server.Notice;
+                if (control != null && !string.IsNullOrEmpty(control.Notice)) return control.Notice;
+                if (storage != null && !string.IsNullOrEmpty(storage.Notice)) return storage.Notice;
+                if (checkpoint != null && !string.IsNullOrEmpty(checkpoint.Notice)) return checkpoint.Notice;
+                if (storageDoor != null && !string.IsNullOrEmpty(storageDoor.Notice)) return storageDoor.Notice;
+                if (controlDoor != null && !string.IsNullOrEmpty(controlDoor.Notice)) return controlDoor.Notice;
+                if (serverDoor != null && !string.IsNullOrEmpty(serverDoor.Notice)) return serverDoor.Notice;
+                if (checkpointDoor != null && !string.IsNullOrEmpty(checkpointDoor.Notice)) return checkpointDoor.Notice;
+                if (equipment != null && equipment.StorageKeyNotice.Length > 0) return equipment.StorageKeyNotice;
+                if (equipment != null && equipment.ControlKeyNotice.Length > 0) return equipment.ControlKeyNotice;
+                if (equipment != null && equipment.ServerKeyNotice.Length > 0) return equipment.ServerKeyNotice;
+                return supplyCache != null ? supplyCache.Notice : string.Empty;
             }
-            return top + height + 10 * scale;
-        }
-
-        private float DrawSummary(float top, float width, float scale, string title, string objective, bool complete,
-            bool showCompletedObjective = false)
-        {
-            detailStyle ??= new GUIStyle(GUI.skin.label) { wordWrap = true };
-            detailStyle.fontSize = Mathf.RoundToInt(14 * scale);
-            detailStyle.normal.textColor = complete ? CompleteAccent : Color.white;
-            string text = $"{title}  ·  {(complete && !showCompletedObjective ? "Complete" : objective)}";
-            float margin = 16 * scale;
-            float textWidth = width - 22 * scale;
-            float textHeight = detailStyle.CalcHeight(new GUIContent(text), textWidth);
-            float height = textHeight + 6 * scale;
-            DrawBackground(new Rect(margin, top, width, height), complete ? CompleteAccent : new Color(.45f, .57f, .63f));
-            GUI.Label(new Rect(margin + 11 * scale, top + 3 * scale, textWidth, textHeight), text, detailStyle);
-            return top + height + 4 * scale;
-        }
-
-        private static void DrawBackground(Rect rect, Color accent)
-        {
-            Color previousColor = GUI.color;
-            GUI.color = PanelColor;
-            GUI.DrawTexture(rect, Texture2D.whiteTexture);
-            GUI.color = accent;
-            GUI.DrawTexture(new Rect(rect.x, rect.y, 3, rect.height), Texture2D.whiteTexture);
-            GUI.color = previousColor;
         }
     }
 }

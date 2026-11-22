@@ -530,8 +530,9 @@ namespace ShiftFour
             var storage = layout.GetComponentInChildren<StoragePowerMission>();
             if (layout == fixedLayout && storage != null) storage.ResetMission();
             var extraction = layout.GetComponentInChildren<OpenWorldMissionManager>();
-            if (extraction != null)
-                extraction.BindMissions(checkpoint, server, control, storage, spawn != null ? spawn.GetComponentInChildren<PlayerController>() : null);
+            var actor = spawn != null ? spawn.GetComponentInChildren<PlayerController>() : null;
+            if (extraction != null) extraction.BindMissions(checkpoint, server, control, storage, actor);
+            if (Application.isPlaying) HallAudio.Bind(buildings, actor, checkpoint, server, control, storage);
 
             GetComponent<OutdoorMissionMenu>()?.BindExtraction(extraction);
             var feedback = spawn != null ? spawn.GetComponentInChildren<PrototypePlayerFeedback>() : null;
@@ -539,7 +540,7 @@ namespace ShiftFour
             bool hasHud = feedback != null && feedback.enabled;
             if (hasHud)
             {
-                feedback.SetMissions(buildings, checkpoint, server, control, storage, extraction);
+                feedback.SetMissions(layout, spawn, checkpoint, server, control, storage, extraction);
                 feedback.SetProgression(layout.GetComponentInChildren<OutdoorSupplyCache>(),
                     layout.GetComponentInChildren<CheckpointAccessDoor>(),
                     buildings?.Find("Server/Server Access Door")?.GetComponent<BuildingAccessDoor>(),

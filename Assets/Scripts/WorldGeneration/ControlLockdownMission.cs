@@ -23,6 +23,8 @@ namespace ShiftFour
         private int activated;
         private float deniedUntil;
 
+        internal int ActivatedCount => activated;
+        internal int TotalSwitches => SwitchCount;
         public bool IsComplete { get; private set; }
         internal event System.Action<ControlLockdownMission> Completed;
         private bool IsReady => activated == SwitchCount;

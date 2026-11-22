@@ -25,8 +25,11 @@ namespace ShiftFour
         private Coroutine warning;
         private float instructionsUntil;
 
+        internal int OnlineCount => completed;
+        internal int TerminalCount => ActivationOrder.Length;
         public bool IsComplete => completed == ActivationOrder.Length;
         internal event System.Action<ServerNetworkPuzzle> Completed;
+        internal event System.Action<ServerTerminal> TerminalActivated;
         public string Objective => $"Restore Server Network ({completed}/{ActivationOrder.Length})";
         public string Prompt => "E: Read Server Sequence";
         public bool HasWarning => warning != null;
@@ -69,6 +72,7 @@ namespace ShiftFour
             completed++;
             terminal.SetOnline(true);
             UpdateDisplay();
+            TerminalActivated?.Invoke(terminal);
             if (IsComplete)
             {
                 Completed?.Invoke(this);

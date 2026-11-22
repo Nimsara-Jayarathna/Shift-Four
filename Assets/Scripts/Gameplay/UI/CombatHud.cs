@@ -74,7 +74,9 @@ namespace ShiftFour
         private void Start()
         {
             // The first world is generated before PlayerController.Awake creates the weapon controller.
-            if (!prototype || weapons != null || player == null) return;
+            if (!prototype || player == null) return;
+            ResetPresentation();
+            if (weapons != null) return;
             Unbind();
             weapons = player.Weapons;
             Bind();
@@ -86,7 +88,7 @@ namespace ShiftFour
         private void Bind()
         {
             if (bound || health == null) return;
-            if (!prototype) health.Damaged += OnPlayerDamage;
+            health.Damaged += OnPlayerDamage;
             if (weapons != null) weapons.ShotAccepted += OnShot;
             foreach (var bar in drones) if (bar.Health != null) bar.Health.Damaged += bar.Listener;
             bound = true;
@@ -147,12 +149,7 @@ namespace ShiftFour
 
         private void Update()
         {
-            if (prototype)
-            {
-                UpdateDroneBars(Mathf.Min(Time.unscaledDeltaTime, .1f), Time.unscaledTime);
-                return;
-            }
-            if (session == null || player == null || health == null || !session.isActiveAndEnabled) return;
+            if (player == null || health == null || (prototype ? player.MenuBlocksInput : session == null || !session.isActiveAndEnabled)) return;
             float dt = Mathf.Min(Time.unscaledDeltaTime, .1f), now = Time.unscaledTime;
             if (!Mathf.Approximately(maximum, health.Maximum))
             { maximum = health.Maximum; DisplayedHealthFraction = DamageTrailFraction = PlayerHealthFraction; }
@@ -215,8 +212,8 @@ namespace ShiftFour
         {
             if (prototype)
             {
-                if (player != null && !player.MenuBlocksInput && CanShowCombat && VisibleDroneBarCount > 0 && Event.current.type == EventType.Repaint)
-                    presentation.DrawPrototypeBars(drones);
+                if (player != null && !player.MenuBlocksInput && CanShowCombat && Event.current.type == EventType.Repaint)
+                    presentation.DrawPrototype(drones, health, DisplayedHealthFraction, DamageTrailFraction, IsRecovering, player.Weapons?.ActiveWeapon);
                 return;
             }
             if (session == null || !session.isActiveAndEnabled || player == null || health == null) return;

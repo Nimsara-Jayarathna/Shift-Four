@@ -112,12 +112,12 @@ namespace ShiftFour.Tests
             Component presenter = model.GetComponent(RuntimeType("PistolPresentation"));
             var flash = (Renderer)Read(presenter, "MuzzleFlash");
             int shots = 0;
-            for (int i = 0; i < 450 && shots < 12; i++)
+            for (int i = 0; i < 900 && shots < 20; i++)
             {
                 if ((bool)Call(weapons, "TryFire")) shots++;
-                if (shots < 12) yield return null;
+                if (shots < 20) yield return null;
             }
-            Assert.That(shots, Is.EqualTo(12));
+            Assert.That(shots, Is.EqualTo(20));
             Assert.That(Read(State, "RoundsInMagazine"), Is.EqualTo(0));
             Assert.That(Read(State, "ReloadState").ToString(), Is.EqualTo("Reloading"));
             Assert.That(flash.enabled, Is.True);
@@ -125,8 +125,8 @@ namespace ShiftFour.Tests
             yield return new WaitForSeconds(.1f);
             Assert.That(flash.enabled, Is.False);
             yield return new WaitForSeconds(1.6f);
-            Assert.That(Read(State, "RoundsInMagazine"), Is.EqualTo(12));
-            Assert.That(Read(State, "ReserveRounds"), Is.EqualTo(68));
+            Assert.That(Read(State, "RoundsInMagazine"), Is.EqualTo(20));
+            Assert.That(Read(State, "ReserveRounds"), Is.EqualTo(140));
         }
 
         [UnityTest]
@@ -143,13 +143,13 @@ namespace ShiftFour.Tests
             menu.SendMessage("OnApplicationFocus", true);
             yield return new WaitForSecondsRealtime(.25f);
             Assert.That(Read(ammo, "ReloadState").ToString(), Is.EqualTo("Reloading"));
-            Assert.That(Read(ammo, "RoundsInMagazine"), Is.EqualTo(11));
+            Assert.That(Read(ammo, "RoundsInMagazine"), Is.EqualTo(19));
             Assert.That(Call(weapons, "TryFire"), Is.EqualTo(false));
             Assert.That(Cursor.lockState, Is.EqualTo(CursorLockMode.None));
             Call(menu, "Play");
             for (int i = 0; i < 240 && Read(ammo, "ReloadState").ToString() == "Reloading"; i++)
                 yield return null;
-            Assert.That(Read(ammo, "RoundsInMagazine"), Is.EqualTo(12));
+            Assert.That(Read(ammo, "RoundsInMagazine"), Is.EqualTo(20));
         }
 
         [UnityTest]
@@ -162,7 +162,8 @@ namespace ShiftFour.Tests
             Assert.That(Call(equipment, "TrySlash"), Is.EqualTo(false));
             OpenCache();
             var ammo = State;
-            Assert.That(Read(ammo, "RoundsInMagazine"), Is.EqualTo(12));
+            Assert.That(Read(ammo, "ReserveRounds"), Is.EqualTo(160));
+            Assert.That(Read(ammo, "RoundsInMagazine"), Is.EqualTo(20));
             Assert.That(Call(weapons, "TryFire"), Is.EqualTo(false), "Knife is still lowering");
             yield return WaitForPistol();
             Assert.That(Call(weapons, "TryFire"), Is.EqualTo(true));
@@ -196,8 +197,8 @@ namespace ShiftFour.Tests
             Assert.That(Call(equipment, "SelectPistol"), Is.EqualTo(true));
             yield return WaitForPistol();
             Assert.That(State, Is.SameAs(ammo));
-            Assert.That(Read(ammo, "RoundsInMagazine"), Is.EqualTo(11));
-            Assert.That(Read(ammo, "ReserveRounds"), Is.EqualTo(80));
+            Assert.That(Read(ammo, "RoundsInMagazine"), Is.EqualTo(19));
+            Assert.That(Read(ammo, "ReserveRounds"), Is.EqualTo(160));
             Call(generator, "Generate");
             yield return null;
             Assert.That(State, Is.Null);

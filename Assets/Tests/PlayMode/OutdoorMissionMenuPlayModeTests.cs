@@ -97,6 +97,74 @@ namespace ShiftFour.Tests
             Press("Pause"); Assert.That(State, Is.EqualTo("Dying"));
         }
 
+        [UnityTest]
+        public IEnumerator BriefingsFreezeInputAndFollowEachGeneratedLayout()
+        {
+            Press("OpenMap"); Press("OpenMissions");
+            Assert.That(State, Is.EqualTo("Title"));
+            yield return StartMission();
+            var generator = Single("WorldGenerator");
+            var player = Single("PlayerController");
+            var feedback = Single("PrototypePlayerFeedback");
+            object map = feedback.GetType().GetProperty("Map", Internal).GetValue(feedback);
+            var project = map.GetType().GetMethod("Project", Internal);
+            var marker = map.GetType().GetMethod("Marker", Internal);
+            var siteType = marker.GetParameters()[0].ParameterType;
+            var frame = new Rect(20, 30, 400, 400);
+            Vector2 ToMap(Vector3 pos) => (Vector2)project.Invoke(map, new object[] { pos, frame });
+            foreach (int seed in new[] { 1234, 5678, 9012 })
+            {
+                generator.GetType().GetField("seed", Internal).SetValue(generator, seed);
+                generator.GetType().GetMethod("Generate").Invoke(generator, null);
+                yield return null;
+                var world = generator.transform.Find("GeneratedWorld");
+                var ground = world.Find("Ground").GetComponent<BoxCollider>().bounds;
+                Assert.That(ToMap(ground.center), Is.EqualTo(frame.center));
+                Assert.That(ToMap(ground.center + Vector3.forward).y, Is.LessThan(frame.center.y));
+                Assert.That(ToMap(ground.center + Vector3.right).x, Is.GreaterThan(frame.center.x));
+                foreach (var site in new[] { "Checkpoint", "Server", "Control", "Storage", "Supply", "Extraction" })
+                {
+                    var pin = (Transform)marker.Invoke(map, new[] { Enum.Parse(siteType, site) });
+                    string path = site == "Supply" ? "OutdoorSupplyCache01" : site == "Extraction" ? "Final Extraction Gate" : "Buildings/" + site;
+                    Assert.That(pin, Is.EqualTo(world.Find(path)));
+                    Assert.That(frame.Contains(ToMap(pin.position)), Is.True);
+                }
+                var current = feedback.GetType().GetProperty("CurrentSite", Internal);
+                Assert.That(current.GetValue(feedback).ToString(), Is.EqualTo("Supply"));
+                foreach (var screen in new[] { "Map", "Missions" })
+                {
+                    Press("Open" + screen); Press("Pause");
+                    Assert.That(State, Is.EqualTo(screen));
+                    Assert.That(Time.timeScale, Is.Zero);
+                    Assert.That(Read(player, "CanAct"), Is.False);
+                    Assert.That(Cursor.lockState, Is.EqualTo(CursorLockMode.None));
+                    yield return null;
+                    Press("Play");
+                    yield return Await(() => State == "Playing");
+                    Assert.That(Time.timeScale, Is.EqualTo(.75f));
+                    Assert.That(Read(player, "CanAct"), Is.True);
+                }
+                Interact(Single("OutdoorSupplyCache"));
+                Assert.That(current.GetValue(feedback).ToString(), Is.EqualTo("Checkpoint"));
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator OutdoorVitalsFollowRealDamageAndRecovery()
+        {
+            yield return StartMission();
+            var health = Single("PlayerController").GetComponent(T("Health"));
+            var hud = Single("CombatHud");
+            float maximum = (float)Read(health, "Maximum");
+            Assert.That(Read(hud, "DisplayedHealthFraction"), Is.EqualTo(1f).Within(.001f));
+            health.GetType().GetMethod("TakeDamage").Invoke(health, new object[] { 40f });
+            yield return null;
+            Assert.That(Read(hud, "PlayerHealthFraction"), Is.EqualTo((maximum - 40) / maximum).Within(.001f));
+            Assert.That((float)Read(hud, "DamageTrailFraction"), Is.GreaterThan((float)Read(hud, "DisplayedHealthFraction")));
+            yield return Await(() => (bool)Read(hud, "IsRecovering"));
+            Assert.That((float)Read(health, "Current"), Is.GreaterThan(maximum - 40f));
+        }
+
         private static void Interact(Component target) => target.GetType().GetMethod("Interact").Invoke(target, null);
         private static void Damage(Component health) => health.GetType().GetMethod("TakeDamage").Invoke(health, new object[] { 10000f });
         private const System.Reflection.BindingFlags Internal = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
@@ -144,15 +212,23 @@ namespace ShiftFour.Tests
             Assert.That(Subscriptions(mission, "Extracted"), Is.EqualTo(1));
             Interact(gate);
             Assert.That(State, Is.EqualTo("Playing"));
+            var feedback = Single("PrototypePlayerFeedback");
+            string CurrentSite() => feedback.GetType().GetProperty("CurrentSite", Internal).GetValue(feedback).ToString();
+            Assert.That(CurrentSite(), Is.EqualTo("Supply"));
             Interact(Single("OutdoorSupplyCache"));
+            Assert.That(CurrentSite(), Is.EqualTo("Checkpoint"));
             Interact(Single("SecurityAccessCard")); Interact(Single("CheckpointSecurityScanner"));
+            Assert.That(CurrentSite(), Is.EqualTo("Server"));
             var terminals = Object.FindObjectsByType(T("ServerTerminal"), FindObjectsSortMode.None)
                 .Cast<Component>().OrderBy(t => t.name).ToArray();
             foreach (int i in new[] { 1, 0, 2 }) Interact(terminals[i]);
+            Assert.That(CurrentSite(), Is.EqualTo("Control"));
             foreach (Component item in Object.FindObjectsByType(T("LockdownSecuritySwitch"), FindObjectsSortMode.None)) Interact(item);
             Interact(Single("ControlLockdownMission"));
+            Assert.That(CurrentSite(), Is.EqualTo("Storage"));
             foreach (Component item in Object.FindObjectsByType(T("PowerCellPickup"), FindObjectsSortMode.None)) Interact(item);
             Interact(Single("StoragePowerMission"));
+            Assert.That(CurrentSite(), Is.EqualTo("Extraction"));
             Assert.That(Read(mission, "BuildingMissionsCompleted"), Is.EqualTo(4));
             var world = Single("WorldGenerator").transform.Find("GeneratedWorld");
             foreach (string path in new[] { "OutdoorScoutPatrols/05 Checkpoint Approach", "Buildings/Server/IndoorGuards/Server Racks",

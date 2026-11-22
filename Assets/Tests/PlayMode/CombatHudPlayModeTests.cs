@@ -82,15 +82,17 @@ namespace ShiftFour.Tests
         [UnityTest] public IEnumerator MainLab_HasOneHud_ActualDamageAndRecoveryDriveVitals()
         {
             Assert.That(FindAll("CombatHud").Length, Is.EqualTo(1));
+            float maximum = (float)Get(playerHealth, "Maximum");
+            float injured = (float)Get(playerHealth, "Current") - 25;
             Damage(playerHealth, 25, scout);
             Assert.That(Value("DamageFlashStrength"), Is.GreaterThan(.9f));
             Assert.That((bool)Get(hud, "DamageDirectionKnown"), Is.True);
             yield return null;
-            Assert.That((float)Get(playerHealth, "Current"), Is.EqualTo(75));
-            Assert.That(Value("PlayerHealthFraction"), Is.EqualTo(.75f).Within(.001f));
+            Assert.That((float)Get(playerHealth, "Current"), Is.EqualTo(injured));
+            Assert.That(Value("PlayerHealthFraction"), Is.EqualTo(injured / maximum).Within(.001f));
             Assert.That(Value("DamageTrailFraction"), Is.GreaterThan(Value("PlayerHealthFraction")));
             yield return new WaitForSeconds(3.15f);
-            Assert.That((float)Get(playerHealth, "Current"), Is.GreaterThan(75));
+            Assert.That((float)Get(playerHealth, "Current"), Is.GreaterThan(injured));
             Assert.That((bool)Get(hud, "IsRecovering"), Is.True);
             Assert.That(Value("HitMarkerStrength"), Is.Zero);
         }
@@ -101,19 +103,19 @@ namespace ShiftFour.Tests
             float damage = PlayerWeaponTestActions.EffectiveDamage(player);
             Assert.That((float)Get(scoutHealth, "Current"), Is.EqualTo(before - damage));
             Assert.That(Value("HitMarkerStrength"), Is.GreaterThan(.9f));
-            yield return new WaitForSeconds(.3f);
+            yield return new WaitForSeconds(PlayerWeaponTestActions.Data(player, "FireInterval") + .02f);
             BlockScout(); Assert.That(Fire(), Is.True);
             Assert.That((float)Get(scoutHealth, "Current"), Is.EqualTo(before - damage));
             Assert.That(Value("HitMarkerStrength"), Is.Zero, "Firing into cover cannot confirm a hit.");
-            Object.Destroy(wall); yield return null; yield return new WaitForSeconds(.3f);
+            Object.Destroy(wall); yield return null; yield return new WaitForSeconds(PlayerWeaponTestActions.Data(player, "FireInterval") + .02f);
             camera.transform.rotation = Quaternion.LookRotation(Vector3.up);
             Assert.That(Fire(), Is.True); Assert.That(Value("HitMarkerStrength"), Is.Zero);
-            yield return new WaitForSeconds(.3f); AimAtScout();
+            yield return new WaitForSeconds(PlayerWeaponTestActions.Data(player, "FireInterval") + .02f); AimAtScout();
             int remainingShots = Mathf.CeilToInt((before - damage) / damage);
             for (int i = 0; i < remainingShots; i++)
             {
                 Assert.That(Fire(), Is.True);
-                if (i < remainingShots - 1) yield return new WaitForSeconds(.3f);
+                if (i < remainingShots - 1) yield return new WaitForSeconds(PlayerWeaponTestActions.Data(player, "FireInterval") + .02f);
             }
             Assert.That((bool)Get(scoutHealth, "IsAlive"), Is.False);
             Assert.That(Value("DefeatMarkerStrength"), Is.GreaterThan(.9f));
@@ -159,7 +161,8 @@ namespace ShiftFour.Tests
             ((Behaviour)hud).enabled = true;
             var targets = Array.CreateInstance(T("DroneBrain"), brains.Length);
             for (int i = 0; i < brains.Length; i++) targets.SetValue(brains[i], i);
-            Call(hud, "Initialize", session, player, targets); Call(hud, "Initialize", session, player, targets);
+            var initialize = hud.GetType().GetMethod("Initialize", BindingFlags.Public | BindingFlags.Instance);
+            for (int i = 0; i < 2; i++) initialize.Invoke(hud, new object[] { session, player, targets });
             Assert.That(DamageObservers(playerHealth).Count(d => ReferenceEquals(d.Target, hud)), Is.EqualTo(1));
             Assert.That(DamageObservers(scoutHealth).Length, Is.EqualTo(targetSubscribers));
             Damage(scoutHealth, 1, player); Assert.That(Value("HitMarkerStrength"), Is.GreaterThan(.9f));
@@ -179,8 +182,8 @@ namespace ShiftFour.Tests
             Assert.That(FindAll("CombatHud").Length, Is.EqualTo(1));
             Assert.That((float)Get(playerHealth, "Current"), Is.EqualTo(100f * PlayerWeaponTestActions.CombatMultiplier));
             object weaponState = Get(Get(player, "Weapons"), "ActiveWeapon");
-            Assert.That(Get(weaponState, "RoundsInMagazine"), Is.EqualTo(12));
-            Assert.That(Get(weaponState, "ReserveRounds"), Is.EqualTo(80));
+            Assert.That(Get(weaponState, "RoundsInMagazine"), Is.EqualTo(20));
+            Assert.That(Get(weaponState, "ReserveRounds"), Is.EqualTo(160));
             Assert.That(Get(weaponState, "ReloadState").ToString(), Is.EqualTo("Idle"));
             Assert.That(Value("HitMarkerStrength"), Is.Zero); Assert.That(Value("DefeatMarkerStrength"), Is.Zero);
             Assert.That(Value("DamageFlashStrength"), Is.Zero);

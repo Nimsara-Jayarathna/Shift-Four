@@ -22,6 +22,11 @@ namespace ShiftFour
         private int collected;
         private float deniedUntil;
 
+        internal event System.Action<PowerCellPickup> CellCollected;
+        internal event System.Action Restored;
+
+        internal int CollectedCount => collected;
+        internal int TotalCells => RequiredCells;
         public bool IsComplete { get; private set; }
         private bool HasCells => collected == RequiredCells;
         public string Prompt => IsComplete ? PowerRestored : "E: Restore Emergency Generator Power";
@@ -49,6 +54,7 @@ namespace ShiftFour
             collected++;
             deniedUntil = 0f;
             cell.gameObject.SetActive(false);
+            CellCollected?.Invoke(cell);
         }
 
         public void Interact()
@@ -63,6 +69,7 @@ namespace ShiftFour
             IsComplete = true;
             deniedUntil = 0f;
             UpdateDisplay();
+            Restored?.Invoke();
             Debug.Log(CompletionMessage, this);
         }
 
