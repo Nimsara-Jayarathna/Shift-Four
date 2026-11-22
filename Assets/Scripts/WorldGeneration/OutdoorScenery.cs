@@ -5,7 +5,7 @@ using Random = System.Random;
 
 namespace ShiftFour
 {
-    // Render-only meshes share the world's local coordinates. Gameplay and the NavMesh use the existing colliders.
+    // Render batches use the world's local coordinates. Major boulders get individual physics compounds.
     public sealed class OutdoorScenery : MonoBehaviour
     {
         public enum Detail { Low, Standard }
@@ -64,7 +64,9 @@ namespace ShiftFour
             Publish(timber, material, "Facility conifers");
             foreach (Transform rock in transform.Find("Rocks"))
             {
+                int firstVertex = stones.Points.Count;
                 Boulder(stones, random, rock.localPosition - Vector3.up * .75f, BoulderSize);
+                GeneratedBoulderCollision.Build(rock, stones.Points, firstVertex);
             }
             BuildFenceInfill(materials.Metal);
 

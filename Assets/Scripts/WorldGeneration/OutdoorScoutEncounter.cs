@@ -131,13 +131,23 @@ namespace ShiftFour
             }
             settings.agentClimb = .25f;
             var sources = new List<NavMeshBuildSource>();
+            Transform rocks = world.Find("Environment/Rocks");
+            var markups = new List<NavMeshBuildMarkup>
+            {
+                new NavMeshBuildMarkup { root = rocks, ignoreFromBuild = true, applyToChildren = true }
+            };
             NavMeshBuilder.CollectSources(world, WeaponController.GameplayRaycastMask, NavMeshCollectGeometry.PhysicsColliders,
-                0, new List<NavMeshBuildMarkup>(), sources);
+                0, markups, sources);
             if (sources.Count == 0) throw new InvalidOperationException("Generated geometry provided no navigation sources.");
 
             foreach (BoxCollider foundation in foundations)
                 Exclude(sources, foundation.bounds, 6f);
-            foreach (string group in new[] { "Trees", "Rocks", "Crates", "Fences" })
+            // The flying hull uses one conservative exclusion per boulder, regardless of its individual contact shapes.
+            float rockDiameter = OutdoorScenery.BoulderSize.x * 2f * 1.05f;
+            foreach (Transform rock in rocks)
+                Exclude(sources, new Bounds(rock.position, new Vector3(rockDiameter, 0f, rockDiameter)), 5f);
+
+            foreach (string group in new[] { "Trees", "Crates", "Fences" })
                 foreach (Collider solid in world.Find("Environment/" + group).GetComponentsInChildren<Collider>())
                     if (solid.enabled && !solid.isTrigger)
                     {
@@ -146,12 +156,6 @@ namespace ShiftFour
                         {
                             // Rendered conifer crowns extend beyond the collidable trunks.
                             float diameter = (footprint.size.y + 2.6f) * .57f;
-                            footprint.size = new Vector3(diameter, footprint.size.y, diameter);
-                        }
-                        else if (group == "Rocks")
-                        {
-                            // A flying hull must also clear the wider visible rock silhouette.
-                            float diameter = OutdoorScenery.BoulderSize.x * 2f * 1.05f;
                             footprint.size = new Vector3(diameter, footprint.size.y, diameter);
                         }
                         Exclude(sources, footprint, 5f);

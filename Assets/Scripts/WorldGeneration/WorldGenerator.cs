@@ -427,11 +427,7 @@ namespace ShiftFour
                     }
                     else if (kind == 1)
                     {
-                        var rock = Group("Rock", rocks, position + Vector3.up * .8f);
-                        var solid = rock.gameObject.AddComponent<CapsuleCollider>();
-                        solid.center = Vector3.up * .04f;
-                        solid.radius = .99f;
-                        solid.height = 2.2f;
+                        Group("Rock", rocks, position + Vector3.up * .8f);
                         // Keep the seeded prop layout sequence, including the original rock yaw draw.
                         _ = random.NextDouble();
                     }

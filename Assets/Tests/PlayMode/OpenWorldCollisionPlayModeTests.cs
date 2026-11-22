@@ -175,6 +175,130 @@ namespace ShiftFour.Tests
         }
 
         [UnityTest]
+        public IEnumerator GeneratedBouldersMatchTheirVisibleShapeAndKeepRoutesClear()
+        {
+            const int verticesPerBoulder = 7 * 3 * 3;
+            const float probeRadius = 3.3f;
+            const float surfaceTolerance = .23f;
+            int[] seeds = { 1234, 5678, 9012, 1234 };
+            Vector3[] firstPositions = null;
+            int[] firstColliderCounts = null;
+            Transform retiredRocks = null;
+            foreach (int seed in seeds)
+            {
+                Generate(seed);
+                yield return null;
+                Assert.That(retiredRocks == null, Is.True, "Regeneration destroys the old rock compound.");
+                Transform environment = World.Find("Environment");
+                retiredRocks = environment.Find("Rocks");
+                var rocks = retiredRocks.Cast<Transform>().ToArray();
+                var batch = environment.Find("Boulders and scree").GetComponent<MeshFilter>();
+                Assert.That(rocks, Is.Not.Empty);
+                Assert.That(batch.GetComponent<Collider>(), Is.Null, "The render batch and scree have no collider.");
+                Vector3[] vertices = batch.sharedMesh.vertices.Select(batch.transform.TransformPoint).ToArray();
+                var pilot = Find("OutdoorScout")[0].GetComponent<NavMeshAgent>();
+                var outdoor = new NavMeshQueryFilter { agentTypeID = pilot.agentTypeID, areaMask = pilot.areaMask };
+                var counts = new int[rocks.Length];
+
+                for (int index = 0; index < rocks.Length; index++)
+                {
+                    Transform rock = rocks[index];
+                    var visible = new ArraySegment<Vector3>(vertices, index * verticesPerBoulder, verticesPerBoulder);
+                    var pieces = rock.GetComponents<BoxCollider>();
+                    counts[index] = pieces.Length;
+                    Assert.That(pieces.Length, Is.GreaterThan(1));
+                    Assert.That(Physics.GetIgnoreLayerCollision(capsule.gameObject.layer, rock.gameObject.layer), Is.False);
+                    Assert.That(pieces.All(piece => piece.enabled && !piece.isTrigger), Is.True);
+                    Vector3 ground = new Vector3(rock.position.x, World.position.y, rock.position.z);
+                    Assert.That(NavMesh.SamplePosition(ground, out _, .55f, outdoor), Is.False,
+                        $"Seed {seed}, rock {index} excludes the drone route.");
+
+                    var bounds = new Bounds(visible[0], Vector3.zero);
+                    foreach (Vector3 point in visible) bounds.Encapsulate(point);
+                    Bounds solid = pieces[0].bounds;
+                    foreach (BoxCollider piece in pieces) solid.Encapsulate(piece.bounds);
+                    Assert.That((bounds.min - solid.min).magnitude, Is.LessThan(.17f), $"Seed {seed}, rock {index} minimum");
+                    Assert.That((bounds.max - solid.max).magnitude, Is.LessThan(.17f), $"Seed {seed}, rock {index} maximum");
+
+                    for (int angle = 0; angle < 360; angle += 45)
+                    {
+                        Vector3 outward = Quaternion.Euler(0f, angle, 0f) * Vector3.forward;
+                        foreach (float y in new[] { .35f, .85f, 1.3f })
+                        {
+                            var ray = new Ray(new Vector3(rock.position.x, World.position.y + y, rock.position.z) +
+                                outward * probeRadius, -outward);
+                            float rendered = NearestTriangle(ray, visible);
+                            float collision = pieces.Min(piece => piece.Raycast(ray, out RaycastHit hit, probeRadius) ?
+                                hit.distance : float.PositiveInfinity);
+                            Assert.That(float.IsFinite(rendered), Is.True);
+                            Assert.That(collision, Is.EqualTo(rendered).Within(surfaceTolerance),
+                                $"Seed {seed}, rock {index}, heading {angle}, height {y}");
+                        }
+
+                        if (index != 0) continue;
+                        Vector3 start = rock.position + outward * probeRadius;
+                        start.y = World.position.y + .04f;
+                        Place(start);
+                        Walk(-outward, probeRadius + .4f);
+                        Vector3 offset = Vector3.ProjectOnPlane(player.transform.position - rock.position, Vector3.up);
+                        Assert.That(offset.magnitude, Is.GreaterThan(1.1f), $"Seed {seed}, heading {angle} stays outside the center.");
+                        Vector3 finalDirection = offset.normalized;
+                        var finalProbe = new Ray(new Vector3(rock.position.x, player.transform.position.y + capsule.radius, rock.position.z) +
+                            finalDirection * probeRadius, -finalDirection);
+                        float clearance = offset.magnitude - (probeRadius - NearestTriangle(finalProbe, visible));
+                        Assert.That(clearance, Is.InRange(.13f, .68f), $"Seed {seed}, heading {angle} stops close to visible rock.");
+                    }
+                }
+
+                // Walk a full perimeter at walking height, just beyond the widest contact profile.
+                Vector3 center = rocks[0].position;
+                center.y = World.position.y + .04f;
+                Place(center + Vector3.forward * 2.1f);
+                for (int angle = 15; angle <= 360; angle += 15)
+                {
+                    Vector3 goal = center + Quaternion.Euler(0f, angle, 0f) * Vector3.forward * 2.1f;
+                    Vector3 displacement = Vector3.ProjectOnPlane(goal - player.transform.position, Vector3.up);
+                    Walk(displacement.normalized, displacement.magnitude);
+                    Assert.That(Vector3.ProjectOnPlane(goal - player.transform.position, Vector3.up).magnitude,
+                        Is.LessThan(.09f), $"Seed {seed} remains walkable around the boulder.");
+                }
+
+                if (seed != seeds[0]) continue;
+                Vector3[] positions = rocks.Select(rock => rock.position).ToArray();
+                if (firstPositions == null)
+                {
+                    firstPositions = positions;
+                    firstColliderCounts = counts;
+                }
+                else
+                {
+                    Assert.That(positions, Is.EqualTo(firstPositions), "The same seed reproduces each rock position.");
+                    Assert.That(counts, Is.EqualTo(firstColliderCounts), "Regeneration creates the same compound once.");
+                }
+            }
+        }
+
+        private static float NearestTriangle(Ray ray, ArraySegment<Vector3> vertices)
+        {
+            float nearest = float.PositiveInfinity;
+            for (int i = 0; i < vertices.Count; i += 3)
+            {
+                Vector3 a = vertices[i], b = vertices[i + 1], c = vertices[i + 2];
+                Vector3 normal = Vector3.Cross(b - a, c - a);
+                float alignment = Vector3.Dot(normal, ray.direction);
+                if (Mathf.Abs(alignment) < .00001f) continue;
+                float distance = Vector3.Dot(normal, a - ray.origin) / alignment;
+                if (distance <= 0f || distance >= nearest) continue;
+                Vector3 hit = ray.GetPoint(distance);
+                if (Vector3.Dot(normal, Vector3.Cross(b - a, hit - a)) >= -1e-6f &&
+                    Vector3.Dot(normal, Vector3.Cross(c - b, hit - b)) >= -1e-6f &&
+                    Vector3.Dot(normal, Vector3.Cross(a - c, hit - c)) >= -1e-6f)
+                    nearest = distance;
+            }
+            return nearest;
+        }
+
+        [UnityTest]
         public IEnumerator SeededObstaclesAndSecurityDoors_BlockAndClearThePlayerCapsule()
         {
             foreach (int seed in new[] { 1234, 5678, 9012 })
@@ -215,13 +339,8 @@ namespace ShiftFour.Tests
                 Assert.That(Vector3.Dot(player.transform.position - fence.bounds.center, inward), Is.GreaterThan(.28f));
                 Assert.That(World.Find("Environment/Perimeter fence infill").GetComponentInChildren<Collider>(), Is.Null);
 
-                var rock = World.Find("Environment/Rocks").GetChild(0).GetComponent<CapsuleCollider>();
-                Assert.That(rock, Is.Not.Null);
-                Assert.That(rock.bounds.max.y - World.position.y, Is.InRange(1.8f, 2.02f), "Boulder contact stays near its visible height.");
-                Assert.That(rock.bounds.size.x, Is.LessThan(2.2f), "The hidden sphere's worst-axis inflation was removed.");
                 var tree = World.Find("Environment/Trees").GetChild(0).GetChild(0).GetComponent<Collider>();
                 var crate = World.Find("Environment/Crates").GetChild(0).Find("Crate body").GetComponent<BoxCollider>();
-                BlockedBy(rock, Vector3.forward);
                 BlockedBy(tree, Vector3.forward);
                 BlockedBy(crate, crate.transform.forward);
 

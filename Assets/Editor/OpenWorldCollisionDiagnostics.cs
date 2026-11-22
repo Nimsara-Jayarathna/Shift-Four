@@ -84,7 +84,7 @@ public static class OpenWorldCollisionDiagnostics
         if (scenery != null)
         {
             int trees = CheckProps("Trees", tree => IsSolidCollider(tree.Find("Trunk")?.GetComponent<Collider>()));
-            int rocks = CheckProps("Rocks", rock => IsSolidCollider(rock.GetComponent<CapsuleCollider>()));
+            int rocks = CheckProps("Rocks", rock => rock.GetComponents<BoxCollider>().Any(IsSolidCollider));
             int crates = CheckProps("Crates", crate => IsSolid(crate.Find("Crate body")));
             int fences = CheckProps("Fences", IsSolid);
             output.AppendLine($"Scenery · {trees} trees, {rocks} boulders, {crates} crates, {fences} fence spans.");
