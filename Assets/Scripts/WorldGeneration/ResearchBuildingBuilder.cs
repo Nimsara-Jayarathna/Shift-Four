@@ -41,7 +41,8 @@ namespace ShiftFour
             Box("Roof cap", root, Vector3.up * (size.y + .25f), new Vector3(size.x + 1, .5f, size.z + 1), m.Metal);
             Box("Identity band", root, new Vector3(0, size.y - 1.5f, front - .12f), new Vector3(size.x + .1f, 2, .18f), m.Metal, false);
             Box("Accent lintel", root, new Vector3(0, size.y - .35f, front - .2f), new Vector3(size.x, .16f, .22f), accent, false);
-            Label(name.ToUpperInvariant(), root, new Vector3(0, size.y - 1.45f, front - .24f), .48f, font, size.x - 3, 1.8f, m.Lettering);
+            if (type != 0 || m.CheckpointExterior == null)
+                Label(name.ToUpperInvariant(), root, new Vector3(0, size.y - 1.45f, front - .24f), .48f, font, size.x - 3, 1.8f, m.Lettering);
             Box("Entrance sign", root, new Vector3(0, 4.5f, front - .18f), new Vector3(15, .9f, .18f), m.Metal, false);
             Label(subtitle, root, new Vector3(0, 4.5f, front - .3f), .19f, font, 14, .6f, m.Lettering);
             for (int side = -1; side <= 1; side += 2)
@@ -53,7 +54,7 @@ namespace ShiftFour
             if (fixedLayout)
                 Box("Road connection", root, new Vector3(0, .035f, front - 5), new Vector3(4, .07f, 10), m.Concrete);
 
-            if (type == 0) Checkpoint(root, size, front, accent, m);
+            if (type == 0) Checkpoint(root, size, front, accent, m, font);
             else if (type == 1) Server(root, size, front, accent, m);
             else if (type == 2) Control(root, size, front, accent, m);
             else Storage(root, size, front, accent, m);
@@ -86,7 +87,7 @@ namespace ShiftFour
             ResearchInteriorBuilder.Build(Group("Interior", root, Vector3.up * FloorHeight), size, m, font, type);
         }
 
-        private static void Checkpoint(Transform root, Vector3 size, float front, Material accent, PrototypeMaterials m)
+        private static void Checkpoint(Transform root, Vector3 size, float front, Material accent, PrototypeMaterials m, Font font)
         {
             Box("Security canopy", root, new Vector3(0, 5.5f, front - 3), new Vector3(16, .45f, 6), m.Metal);
             for (int side = -1; side <= 1; side += 2)
@@ -96,6 +97,35 @@ namespace ShiftFour
                 Box("Security bollard", root, new Vector3(side * 3, .7f, front - 7), new Vector3(.4f, 1.4f, .4f), accent);
             }
             Box("Roof equipment", root, new Vector3(-6, size.y + 1, 3), new Vector3(5, 1.5f, 5), m.Concrete);
+
+            if (m.CheckpointExterior == null)
+            {
+                Debug.LogWarning("Open World: Checkpoint exterior model is missing from the prototype palette.", root);
+                return;
+            }
+
+            // The model is authored in the existing 24 m shell's local coordinates. Its mesh parts
+            // share project materials and have no colliders, including the guards beside the apron.
+            Transform exterior = Object.Instantiate(m.CheckpointExterior, root, false).transform;
+            exterior.name = "ExteriorDetails";
+            Label("CHECKPOINT 01", exterior, new Vector3(0, 6.27f, front - 6.51f), .8f, font, 13.82f, 1.23f, m.Lettering);
+            var sideSign = Label("CHECKPOINT 01", exterior, new Vector3(size.x * .5f + 1.22f, 7.64f, 0),
+                .85f, font, 12.65f, 1.85f, m.Lettering);
+            sideSign.transform.localRotation = Quaternion.Euler(0, -90, 0);
+            Label("SECURITY INTAKE", exterior, new Vector3(0, 4.83f, front - 1.33f),
+                .22f, font, 4.3f, .27f, m.Lettering);
+
+            for (int side = -1; side <= 1; side += 2)
+            {
+                bool red = side < 0;
+                var lamp = Group(red ? "Red warning light" : "White inspection light", exterior,
+                    new Vector3(side * 3.72f, red ? 3.78f : 3.29f, front - 1.1f)).gameObject.AddComponent<Light>();
+                lamp.type = LightType.Point;
+                lamp.color = red ? new Color(1, .13f, .09f) : new Color(.83f, .94f, 1);
+                lamp.range = 3.4f;
+                lamp.intensity = 3.2f;
+                lamp.shadows = LightShadows.None;
+            }
         }
 
         private static void Server(Transform root, Vector3 size, float front, Material accent, PrototypeMaterials m)

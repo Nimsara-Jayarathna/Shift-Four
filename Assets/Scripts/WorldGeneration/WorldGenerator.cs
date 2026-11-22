@@ -30,6 +30,13 @@ namespace ShiftFour
         [Tooltip("Minimum clearance in metres between building foundations, subject to the selected world size.")]
         private float buildingSpacing = DefaultBuildingSpacing;
         [SerializeField, Range(0, 4)] private float objectDensity = 1;
+        [Header("Outdoor scenery")]
+        [Tooltip("Scales the perimeter forest and the fraction of eligible trees inside the facility.")]
+        [SerializeField, Range(0, 1.5f)] private float treeDensity = 1;
+        [Tooltip("Scales patches of grass, undergrowth and loose stones in open ground.")]
+        [SerializeField, Range(0, 2)] private float grassDensity = 1;
+        [SerializeField] private OutdoorScenery.Detail sceneryDetail = OutdoorScenery.Detail.Standard;
+        [Header("Encounters")]
         [SerializeField] private GameObject scoutPrefab;
         [SerializeField] private GameObject guardPrefab;
         [SerializeField] private GameObject interceptorPrefab;
@@ -114,10 +121,14 @@ namespace ShiftFour
                 Vector3[] positions = PlaceBuildings(random, usable, spacing);
                 var reserved = new List<Rect>();
                 ResearchBuildingBuilder.Build(Group("Buildings", next), materials, font, positions);
-                BuildRoads(Group("Roads", next), usable, positions, reserved);
+                BuildRoads(Group("Roads", next), usable, boundary, positions, reserved);
+                OpenWorldExtractionGate.Build(next, -boundary, materials, font);
                 Transform environment = Group("Environment", next);
                 BuildFence(Group("Fences", environment), boundary);
-                Scatter(environment, random, usable, density, reserved);
+                float trees = Mathf.Clamp(treeDensity, 0, 1.5f);
+                Scatter(environment, random, usable, density, reserved, trees, layoutSeed);
+                environment.gameObject.AddComponent<OutdoorScenery>().Build(layoutSeed, size, trees,
+                    Mathf.Clamp(grassDensity, 0, 2), sceneryDetail, reserved, materials.Foliage);
             }
             catch (Exception exception)
             {
@@ -130,6 +141,8 @@ namespace ShiftFour
             fixedLayout.gameObject.SetActive(false);
             generatedContent = next;
             next.gameObject.SetActive(true);
+            if (Application.isPlaying && gameObject.scene == UnityEngine.SceneManagement.SceneManager.GetActiveScene())
+                OutdoorScenery.ApplyLighting(RenderSettings.sun);
             ResetPlayer(next);
             MarkSceneDirty();
             Debug.Log($"Open World: generated seed {layoutSeed} ({size} × {size} m).", this);
@@ -148,6 +161,14 @@ namespace ShiftFour
                     OutdoorDroneEncounter.Spawn<FlankerBrain>(next, flankerPrefab, player, "Storage", 3,
                         "Flanker", materials.Storage, materials, font, layoutSeed);
                 }
+                var extractionGate = next.GetComponentInChildren<OpenWorldExtractionGate>();
+                if (extractionGate != null)
+                    Debug.Log($"Open World extraction: spawned {extractionGate.name} at {extractionGate.transform.position} on seed {layoutSeed}, behind Spawn at the south end of the avenue.", extractionGate);
+                else
+                    Debug.LogWarning($"Open World extraction: the generated gate is missing on seed {layoutSeed}.", next);
+                var extraction = next.GetComponentInChildren<OpenWorldMissionManager>();
+                if (extraction != null) extraction.BindDrones(next);
+                else Debug.LogWarning($"Open World extraction: no active mission manager on seed {layoutSeed}.", next);
                 if (faceScoutAtSpawn && marker != null &&
                     !Physics.Linecast(player.EyePosition, marker.position, WeaponController.GameplayRaycastMask,
                         QueryTriggerInteraction.Ignore))
@@ -178,11 +199,13 @@ namespace ShiftFour
             return positions;
         }
 
-        private void BuildRoads(Transform roads, float usable, Vector3[] positions, List<Rect> reserved)
+        private void BuildRoads(Transform roads, float usable, float boundary, Vector3[] positions, List<Rect> reserved)
         {
             // Every access road connects to this spine. The spine also contains the spawn.
             float avenueEnd = usable - AvenueWidth * .5f;
             Road("Main avenue", roads, new Vector2(0, -avenueEnd), new Vector2(0, avenueEnd), AvenueWidth, .08f, reserved);
+            Road("Extraction approach", roads, new Vector2(0, -boundary + 1f), new Vector2(0, -avenueEnd), 10f, .09f, reserved);
+            reserved.Add(Rect.MinMaxRect(-7f, -boundary - 4f, 7f, -boundary + 10f));
             for (float z = -usable + 5f; z < usable - 3f; z += 10f)
                 Box("Lane marking", roads, new Vector3(0, .083f, z), new Vector3(.18f, .006f, 3), materials.Marking, false);
 
@@ -220,11 +243,16 @@ namespace ShiftFour
             OpenWorldPrototypeLayout.Fence(fences, southWest, northWest, materials);
             OpenWorldPrototypeLayout.Fence(fences, northWest, northEast, materials);
             OpenWorldPrototypeLayout.Fence(fences, northEast, southEast, materials);
-            OpenWorldPrototypeLayout.Fence(fences, southEast, southWest, materials);
+            // The extraction gate replaces this span of the south perimeter.
+            float gap = OpenWorldExtractionGate.HalfWidth;
+            OpenWorldPrototypeLayout.Fence(fences, southWest, new Vector3(-gap, 0, -edge), materials);
+            OpenWorldPrototypeLayout.Fence(fences, new Vector3(gap, 0, -edge), southEast, materials);
         }
 
-        private void Scatter(Transform environment, Random random, float usable, float density, List<Rect> reserved)
+        private void Scatter(Transform environment, Random random, float usable, float density, List<Rect> reserved,
+            float treeDensityScale, int layoutSeed)
         {
+            var treeSelection = new Random(layoutSeed ^ 0x4a752);
             Transform trees = Group("Trees", environment);
             Transform rocks = Group("Rocks", environment);
             Transform crates = Group("Crates", environment);
@@ -239,14 +267,20 @@ namespace ShiftFour
                     if (!TryPlaceProp(random, usable, reserved, out Vector3 position)) break;
                     if (kind == 0)
                     {
-                        Transform tree = Group("Tree", trees, position);
                         float height = Between(random, 4.5f, 6.5f);
+                        // Consume the layout draw before filtering trees so scenery controls never move crates or rocks.
+                        if (treeSelection.NextDouble() >= treeDensityScale)
+                        {
+                            requested--;
+                            continue;
+                        }
+                        Transform tree = Group("Tree", trees, position);
                         Cylinder("Trunk", tree, Vector3.up * (height * .5f), .65f, height, materials.Wood);
-                        Sphere("Canopy", tree, Vector3.up * (height + 1), new Vector3(5, 5.5f, 5), materials.Foliage, false);
                     }
                     else if (kind == 1)
                     {
                         var rock = Sphere("Rock", rocks, position + Vector3.up * .8f, new Vector3(3.2f, 2, 2.8f), materials.Rock);
+                        rock.GetComponent<MeshRenderer>().enabled = false;
                         rock.transform.localRotation = Quaternion.Euler(12, Between(random, 0, 360), 9);
                     }
                     else
@@ -331,12 +365,15 @@ namespace ShiftFour
             if (layout == fixedLayout && control != null) control.ResetMission();
             var storage = layout.GetComponentInChildren<StoragePowerMission>();
             if (layout == fixedLayout && storage != null) storage.ResetMission();
+            var extraction = layout.GetComponentInChildren<OpenWorldMissionManager>();
+            if (extraction != null)
+                extraction.BindMissions(checkpoint, server, control, storage, spawn != null ? spawn.GetComponentInChildren<PlayerController>() : null);
 
             var feedback = spawn != null ? spawn.GetComponentInChildren<PrototypePlayerFeedback>() : null;
             // The generator's Awake can run before the enabled HUD receives OnEnable.
             bool hasHud = feedback != null && feedback.enabled;
             if (hasHud)
-                feedback.SetMissions(buildings, checkpoint, server, control, storage);
+                feedback.SetMissions(buildings, checkpoint, server, control, storage, extraction);
             else
                 Debug.LogWarning("Open World missions: no active objective HUD under Spawn.", this);
 

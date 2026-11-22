@@ -120,7 +120,7 @@ public static class OpenWorldPrototypeCreator
         // The original layout is a usable fallback, including after the generated layout is cleared.
         RenderSettings.sun.transform.SetParent(world, true);
         Transform fixedLayout = PrototypeGeometry.Group("Fixed Layout", world);
-        foreach (string name in new[] { "Ground", "Roads", "Buildings", "Environment" })
+        foreach (string name in new[] { "Ground", "Roads", "Buildings", "Environment", "Final Extraction Gate" })
             world.Find(name).SetParent(fixedLayout, false);
         var scout = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Agents/Scout.prefab");
         var generator = world.gameObject.AddComponent<WorldGenerator>();
@@ -150,6 +150,7 @@ public static class OpenWorldPrototypeCreator
             Server = Material("Server blue", lit, new Color(.24f, .53f, .64f)),
             Control = Material("Control teal", lit, new Color(.30f, .61f, .51f)),
             Storage = Material("Storage rust", lit, new Color(.66f, .37f, .25f)),
+            CheckpointExterior = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Models/SF_CheckpointExterior.fbx"),
             ServerRack = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Sections/ServerRack.prefab"),
             Lettering = AssetDatabase.LoadAssetAtPath<Material>("Assets/Environment/WorldBuilder/Room lettering.mat"),
             CheckpointSignal = Material("Checkpoint signal", Shader.Find("Universal Render Pipeline/Unlit"), new Color(.24f, .98f, 1f))

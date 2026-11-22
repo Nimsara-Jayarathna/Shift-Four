@@ -16,16 +16,19 @@ namespace ShiftFour
         private ServerNetworkPuzzle server;
         private ControlLockdownMission control;
         private StoragePowerMission storage;
+        private OpenWorldMissionManager extraction;
         private BoxCollider checkpointFloor, serverFloor, controlFloor, storageFloor;
-        private GUIStyle titleStyle, objectiveStyle, detailStyle;
+        private GUIStyle titleStyle, objectiveStyle, detailStyle, victoryStyle;
+        public OpenWorldMissionManager ExtractionManager => extraction;
 
         internal void SetMissions(Transform buildings, CheckpointSecurityScanner scanner, ServerNetworkPuzzle network,
-            ControlLockdownMission lockdown, StoragePowerMission power)
+            ControlLockdownMission lockdown, StoragePowerMission power, OpenWorldMissionManager finalMission)
         {
             checkpoint = scanner;
             server = network;
             control = lockdown;
             storage = power;
+            extraction = finalMission;
             checkpointFloor = FindFloor(buildings, "Checkpoint");
             serverFloor = FindFloor(buildings, "Server");
             controlFloor = FindFloor(buildings, "Control");
@@ -42,8 +45,14 @@ namespace ShiftFour
         private void OnGUI()
         {
             if (Event.current.type != EventType.Repaint || player == null) return;
+            if (extraction != null && extraction.Escaped)
+            {
+                DrawVictory();
+                return;
+            }
 
             DrawMissions();
+            if (extraction != null) DrawExtractionTracker();
 
             if (Cursor.lockState == CursorLockMode.Locked)
             {
@@ -100,25 +109,26 @@ namespace ShiftFour
             float width = Mathf.Min(490 * scale, Screen.width * .47f - margin);
             float top = margin;
             var focus = FocusedMission();
+            string headingPrefix = extraction != null && extraction.RegisteredDrones > 0 ? string.Empty : "OPTIONAL ";
 
             switch (focus)
             {
                 case Mission.Checkpoint:
-                    top = DrawObjective(top, width, scale, "OPTIONAL CHECKPOINT TASK", checkpoint.Objective,
+                    top = DrawObjective(top, width, scale, headingPrefix + "CHECKPOINT TASK", checkpoint.Objective,
                         checkpoint.Hint, checkpoint.Notice, checkpoint.IsComplete, new Color(1f, .82f, .44f), true);
                     break;
                 case Mission.Server:
-                    top = DrawObjective(top, width, scale, "OPTIONAL SERVER TASK",
+                    top = DrawObjective(top, width, scale, headingPrefix + "SERVER TASK",
                         server.IsComplete ? ServerNetworkPuzzle.CompletionMessage : server.Objective,
                         server.IsComplete ? string.Empty : "Read the sequence display inside Server",
                         server.Notice, server.IsComplete, new Color(.51f, .88f, 1f), server.HasWarning);
                     break;
                 case Mission.Control:
-                    top = DrawObjective(top, width, scale, "OPTIONAL CONTROL ROOM TASK", control.Objective,
+                    top = DrawObjective(top, width, scale, headingPrefix + "CONTROL ROOM TASK", control.Objective,
                         control.Hint, control.Notice, control.IsComplete, new Color(1f, .57f, .49f), true);
                     break;
                 case Mission.Storage:
-                    top = DrawObjective(top, width, scale, "OPTIONAL STORAGE TASK", storage.Objective,
+                    top = DrawObjective(top, width, scale, headingPrefix + "STORAGE TASK", storage.Objective,
                         storage.Hint, storage.Notice, storage.IsComplete, new Color(.91f, .81f, 1f), true);
                     break;
             }
@@ -131,6 +141,65 @@ namespace ShiftFour
                 top = DrawSummary(top, width, scale, "Control", control.Objective, control.IsComplete);
             if (focus != Mission.Storage && storage != null && storage.isActiveAndEnabled)
                 DrawSummary(top, width, scale, "Storage", storage.Objective, storage.IsComplete);
+        }
+
+        private void DrawExtractionTracker()
+        {
+            float scale = Mathf.Clamp(Screen.height / 900f, .75f, 2f);
+            float margin = 16 * scale;
+            float width = Mathf.Min(430 * scale, Screen.width * .47f - margin);
+            float x = Screen.width - width - margin;
+            float inset = 12 * scale;
+            float textWidth = width - 2 * inset;
+            bool ready = extraction.IsReady;
+            Color accent = ready ? CompleteAccent : new Color(1f, .49f, .42f);
+            string heading = ready ? "Extraction Gate: READY" : "Extraction Gate: LOCKED";
+            string counters = $"Building Missions: {extraction.BuildingMissionsCompleted}/{OpenWorldMissionManager.RequiredMissions}\n" +
+                $"Security Drones: {extraction.DronesDefeated}/{OpenWorldMissionManager.RequiredDrones}";
+            string notice = extraction.Notice;
+            string route = extraction.RegisteredDrones == 0 ? "Generate World to spawn the security drones" :
+                "South end of the main avenue, 14 m behind spawn";
+            string detail = string.IsNullOrEmpty(notice) ? route : notice;
+
+            titleStyle ??= new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold };
+            detailStyle ??= new GUIStyle(GUI.skin.label) { wordWrap = true };
+            titleStyle.fontSize = Mathf.RoundToInt(22 * scale);
+            detailStyle.fontSize = Mathf.RoundToInt(20 * scale);
+            titleStyle.normal.textColor = accent;
+            detailStyle.normal.textColor = Color.white;
+            float headingHeight = 30 * scale;
+            float countersHeight = detailStyle.CalcHeight(new GUIContent(counters), textWidth);
+            detailStyle.fontSize = Mathf.RoundToInt(17 * scale);
+            float detailHeight = detailStyle.CalcHeight(new GUIContent(detail), textWidth);
+            DrawBackground(new Rect(x, margin, width, 2 * inset + headingHeight + countersHeight + 7 * scale + detailHeight), accent);
+            float y = margin + inset;
+            GUI.Label(new Rect(x + inset, y, textWidth, headingHeight), heading, titleStyle);
+            y += headingHeight;
+            detailStyle.fontSize = Mathf.RoundToInt(20 * scale);
+            GUI.Label(new Rect(x + inset, y, textWidth, countersHeight), counters, detailStyle);
+            detailStyle.fontSize = Mathf.RoundToInt(17 * scale);
+            detailStyle.normal.textColor = ready ? CompleteAccent : new Color(1f, .85f, .8f);
+            GUI.Label(new Rect(x + inset, y + countersHeight + 7 * scale, textWidth, detailHeight), detail, detailStyle);
+        }
+
+        private void DrawVictory()
+        {
+            Rect screen = new Rect(0, 0, Screen.width, Screen.height);
+            Color previous = GUI.color;
+            GUI.color = new Color(.035f, .065f, .08f, .97f);
+            GUI.DrawTexture(screen, Texture2D.whiteTexture);
+            GUI.color = previous;
+
+            victoryStyle ??= new GUIStyle(GUI.skin.label)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                fontStyle = FontStyle.Bold,
+                wordWrap = true
+            };
+            victoryStyle.fontSize = Mathf.RoundToInt(Mathf.Clamp(Screen.width * .035f, 18f, 60f));
+            victoryStyle.normal.textColor = CompleteAccent;
+            GUI.Label(new Rect(screen.width * .05f, screen.height * .25f, screen.width * .9f, screen.height * .5f),
+                OpenWorldMissionManager.VictoryMessage, victoryStyle);
         }
 
         private float DrawObjective(float top, float width, float scale, string title, string objective, string detail,

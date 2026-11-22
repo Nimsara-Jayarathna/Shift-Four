@@ -15,7 +15,20 @@ namespace ShiftFour
             BuildRoads(Group("Roads", world), m);
             ResearchBuildingBuilder.Build(Group("Buildings", world), m, font);
             BuildEnvironment(Group("Environment", world), m, font);
+            BuildFixedExtraction(world, m, font);
             BuildSpawn(Group("Spawn", world, SpawnPosition));
+        }
+
+        internal static void BuildFixedExtraction(Transform layout, PrototypeMaterials m, Font font)
+        {
+            const float south = -96f;
+            Box("Extraction approach", layout.Find("Roads"), new Vector3(0f, .045f, -92.5f),
+                new Vector3(10f, .09f, 15f), m.Road);
+            Transform fences = layout.Find("Environment/Fences");
+            float gap = OpenWorldExtractionGate.HalfWidth;
+            Fence(fences, new Vector3(-10f, 0f, south), new Vector3(-gap, 0f, south), m);
+            Fence(fences, new Vector3(gap, 0f, south), new Vector3(10f, 0f, south), m);
+            OpenWorldExtractionGate.Build(layout, south, m, font);
         }
 
         private static void BuildRoads(Transform roads, PrototypeMaterials m)
@@ -82,7 +95,6 @@ namespace ShiftFour
             Fence(fences, new Vector3(-96, 0, 96), new Vector3(96, 0, 96), m);
             Fence(fences, new Vector3(-96, 0, -96), new Vector3(-10, 0, -96), m);
             Fence(fences, new Vector3(10, 0, -96), new Vector3(96, 0, -96), m);
-            Fence(fences, new Vector3(-10, 0, -96), new Vector3(10, 0, -96), m);
 
             Transform lighting = Group("Lighting", environment);
             foreach (float z in new[] { -65f, -9f, 55f, 82f })
