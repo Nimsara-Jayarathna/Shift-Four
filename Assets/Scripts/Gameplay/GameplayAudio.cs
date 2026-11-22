@@ -15,6 +15,7 @@ namespace ShiftFour
         [SerializeField, Range(0f, 1f)] private float backgroundMusicVolume = .12f;
         [SerializeField, Range(0f, 1f)] private float reloadVolume = .65f;
         private float musicGain = 1f, effectsGain = 1f;
+        internal float EffectsGain => effectsGain;
         private readonly float[] voiceLevels = new float[VoiceCapacity];
         private AudioSource backgroundMusic;
         private AudioSource reloadSource;

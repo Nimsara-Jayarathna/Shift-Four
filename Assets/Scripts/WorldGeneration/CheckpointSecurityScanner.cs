@@ -34,6 +34,7 @@ namespace ShiftFour
         };
         public bool IsComplete => stage == Stage.Complete;
         internal event System.Action<CheckpointSecurityScanner> Completed;
+        internal event System.Action Denied;
         public string Notice => Time.unscaledTime < deniedUntil ? CardRequired : string.Empty;
 
         internal void Configure(SecurityAccessCard accessCard, Renderer lamp, Light fill, TextMesh display)
@@ -62,6 +63,7 @@ namespace ShiftFour
             if (stage == Stage.FindCard)
             {
                 deniedUntil = Time.unscaledTime + 2.5f;
+                Denied?.Invoke();
                 return;
             }
 
