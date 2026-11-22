@@ -29,6 +29,7 @@ namespace ShiftFour
                 case 2: Control(props, m, font); break;
                 case 3: Storage(props, m, font); break;
             }
+            HallInstrumentation.Build(root, props, m, font, type);
         }
 
         private static void Lighting(Transform fixtures, Vector3 size, Color color, PrototypeMaterials m)
@@ -242,8 +243,8 @@ namespace ShiftFour
                     new Vector3(.58f, .33f, .1f), signal, false).GetComponent<Renderer>();
                 Light light = Group("Warning light", beacon, new Vector3(0, -.12f, -.65f)).gameObject.AddComponent<Light>();
                 light.type = LightType.Point;
-                light.range = 7.5f;
-                light.intensity = 9f;
+                light.range = 5.5f;
+                light.intensity = 4f;
                 light.shadows = LightShadows.None;
                 warningLights[i] = light;
             }

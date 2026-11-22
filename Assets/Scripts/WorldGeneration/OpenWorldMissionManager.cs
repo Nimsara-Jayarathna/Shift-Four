@@ -26,10 +26,10 @@ namespace ShiftFour
         private bool previousCursorVisibility;
         private bool suspendedPlayer;
 
-        private bool CheckpointComplete => checkpoint != null && checkpoint.IsComplete;
-        private bool ServerComplete => server != null && server.IsComplete;
-        private bool ControlComplete => control != null && control.IsComplete;
-        private bool StorageComplete => storage != null && storage.IsComplete;
+        internal bool CheckpointComplete => checkpoint != null && checkpoint.IsComplete;
+        internal bool ServerComplete => server != null && server.IsComplete;
+        internal bool ControlComplete => control != null && control.IsComplete;
+        internal bool StorageComplete => storage != null && storage.IsComplete;
 
         public int BuildingMissionsCompleted => (CheckpointComplete ? 1 : 0) + (ServerComplete ? 1 : 0) +
             (ControlComplete ? 1 : 0) + (StorageComplete ? 1 : 0);
@@ -57,6 +57,7 @@ namespace ShiftFour
             }
         }
         public bool IsReady => BuildingMissionsCompleted == RequiredMissions && DronesDefeated == RequiredDrones;
+        internal event System.Action Extracted;
         public bool Escaped { get; private set; }
         public string Notice => !IsReady && Time.unscaledTime < noticeUntil ? notice : string.Empty;
 
@@ -125,6 +126,7 @@ namespace ShiftFour
             Cursor.visible = true;
             if (gate != null) gate.Refresh();
             Debug.Log(VictoryMessage, this);
+            Extracted?.Invoke();
         }
 
         internal string RemainingObjectives()

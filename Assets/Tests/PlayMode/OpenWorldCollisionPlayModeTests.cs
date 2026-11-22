@@ -43,6 +43,49 @@ namespace ShiftFour.Tests
         }
 
         [UnityTest]
+        public IEnumerator HallDisplaysFollowMissionsAndRetireWithTheirRooms()
+        {
+            var material = Resources.Load<Material>("Hall Instrumentation");
+            Assert.That(material, Is.Not.Null);
+            var block = new MaterialPropertyBlock();
+            float Level(string path)
+            {
+                World.Find("Buildings/" + path).GetComponent<Renderer>().GetPropertyBlock(block);
+                return block.GetFloat("_Level");
+            }
+
+            const string checkpoint = "Checkpoint/Interior/Props/Scanner partition/Security Scanner Reader/Authentication ticks";
+            const string server = "Server/Interior/Props/Network sequence display/Routing trace";
+            const string control = "Control/Interior/Props/Emergency warning beacon/Lockdown annunciator";
+            const string storage = "Storage/Interior/Props/Emergency generator/Energy core projection";
+            foreach (int seed in new[] { 1234, 5678, 9012 })
+            {
+                Transform retired = World;
+                Generate(seed);
+                yield return null;
+                Assert.That(retired == null, Is.True);
+                foreach (string site in Sites)
+                {
+                    var room = World.Find("Buildings/" + site + "/Interior");
+                    Assert.That(room.GetComponentsInChildren(RuntimeType("HallInstrumentation")).Length, Is.EqualTo(1));
+                    var displays = room.GetComponentsInChildren<Renderer>().Where(r => r.sharedMaterial == material).ToArray();
+                    Assert.That(displays.Length, Is.GreaterThan(0));
+                    Assert.That(displays.All(r => r.GetComponent<Collider>() == null), Is.True, site);
+                }
+                Assert.That(Level(checkpoint), Is.LessThan(0));
+                Assert.That(Level(server), Is.Zero);
+                Assert.That(Level(control), Is.LessThan(0));
+                Assert.That(Level(storage), Is.Zero);
+                for (int i = 0; i < Sites.Length; i++) Complete(i);
+                yield return new WaitForSeconds(.22f);
+                Assert.That(Level(checkpoint), Is.EqualTo(1));
+                Assert.That(Level(server), Is.EqualTo(1));
+                Assert.That(Level(control), Is.GreaterThan(1), "Secured, steady lighting");
+                Assert.That(Level(storage), Is.EqualTo(1));
+            }
+        }
+
+        [UnityTest]
         public IEnumerator RegenerationReleasesFenceMeshesAndSharedDroneMaterials()
         {
             foreach (int seed in new[] { 1234, 5678, 9012 })
