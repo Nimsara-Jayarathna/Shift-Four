@@ -13,34 +13,31 @@ namespace ShiftFour
         {
             internal readonly string Building;
             internal readonly float Detection, Attack, Cooldown;
-            internal readonly Material Accent;
             internal readonly Rect[] Routes;
 
-            internal Site(string building, float detection, float attack, float cooldown,
-                Material accent, params Rect[] routes)
+            internal Site(string building, float detection, float attack, float cooldown, params Rect[] routes)
             {
                 Building = building;
                 Detection = detection;
                 Attack = attack;
                 Cooldown = cooldown;
-                Accent = accent;
                 Routes = routes;
             }
         }
 
         // These loops sit beside mission fixtures, leaving the interaction faces and entrance aisles clear.
-        private static Site[] Sites(PrototypeMaterials materials) => new[]
+        private static readonly Site[] Sites =
         {
-            new Site("Checkpoint", 13f, 9f, 2.4f, materials.Checkpoint,
+            new Site("Checkpoint", 13f, 9f, 2.4f,
                 Rect.MinMaxRect(-7.6f, .3f, -3.2f, 3.1f)),
-            new Site("Server", 17f, 11f, 2.1f, materials.Server,
+            new Site("Server", 17f, 11f, 2.1f,
                 Rect.MinMaxRect(-7.5f, 5f, -2.5f, 8.2f),
                 Rect.MinMaxRect(4f, -9.6f, 9f, -7.2f)),
-            new Site("Control", 20f, 12f, 1.95f, materials.Control,
+            new Site("Control", 20f, 12f, 1.95f,
                 Rect.MinMaxRect(-3.4f, 6.65f, 3.4f, 8.45f),
                 Rect.MinMaxRect(-10.5f, -9.5f, -8.4f, -2.8f),
                 Rect.MinMaxRect(8.6f, -1.4f, 10.7f, 5.5f)),
-            new Site("Storage", 23f, 13f, 1.75f, materials.Storage,
+            new Site("Storage", 23f, 13f, 1.75f,
                 Rect.MinMaxRect(10.6f, 6.6f, 12.6f, 9.5f),
                 Rect.MinMaxRect(4.7f, -1f, 8.8f, .85f),
                 Rect.MinMaxRect(-9.7f, -9.6f, -5.3f, -7.1f),
@@ -70,6 +67,7 @@ namespace ShiftFour
         private NavMeshDataInstance registration;
         private NavMeshQueryFilter filter;
         private Vector3[][] patrols;
+        private Vector3[] securityPosts;
         private Vector3[] approachGoals;
         private float[] approachUntil;
         internal WaypointGraph Graph { get; private set; }
@@ -86,10 +84,12 @@ namespace ShiftFour
         internal float Detection => site.Detection * detectionScale;
         internal float Attack => site.Attack;
         internal float Cooldown => site.Cooldown;
+        internal float FieldOfView { get; private set; }
         internal Vector3[] Patrol(int slot) => patrols[slot];
+        internal Vector3 SecurityPost(int slot) => securityPosts[slot];
 
         internal static GuardBrain Deploy(Transform layout, GameObject prefab, PlayerController player,
-            float detectionScale, PrototypeMaterials materials, Font font, int seed)
+            float detectionScale, float fieldOfView, int seed)
         {
             var agent = prefab != null ? prefab.GetComponent<NavMeshAgent>() : null;
             var body = prefab != null ? prefab.GetComponent<DroneBody>() : null;
@@ -100,7 +100,7 @@ namespace ShiftFour
             }
 
             GuardBrain extractionGuard = null;
-            Site[] sites = Sites(materials);
+            Site[] sites = Sites;
             for (int i = 0; i < sites.Length; i++)
             {
                 Site site = sites[i];
@@ -111,6 +111,7 @@ namespace ShiftFour
                     continue;
                 }
                 var zone = Group("IndoorGuards", area).gameObject.AddComponent<IndoorGuardZone>();
+                zone.FieldOfView = fieldOfView;
                 try
                 {
                     zone.Initialize(area, site, i, detectionScale, agent, body);
@@ -129,7 +130,7 @@ namespace ShiftFour
                     bool tracksExtraction = i == 1 && slot == 0;
                     string role = tracksExtraction ? "Guard" : $"Guard {i + 1:00}-{slot + 1:00}";
                     GuardBrain guard = OutdoorDroneEncounter.Spawn<GuardBrain>(layout, prefab, player, site.Building, i,
-                        role, site.Accent, materials, font, seed, zone.transform, Posts[i][slot], zone, slot);
+                        role, seed, zone.transform, Posts[i][slot], zone, slot);
                     if (guard == null) continue;
                     spawned++;
                     if (tracksExtraction) extractionGuard = guard;
@@ -156,11 +157,19 @@ namespace ShiftFour
 
             BakeNavigation(agent, body);
             patrols = new Vector3[site.Routes.Length][];
+            securityPosts = new Vector3[patrols.Length];
             for (int slot = 0; slot < patrols.Length; slot++)
             {
                 patrols[slot] = FindPatrol(slot, body);
                 if (patrols[slot] == null)
                     throw new InvalidOperationException($"No clear indoor loop near {Posts[index][slot]}.");
+                Vector3 center = Vector3.zero;
+                foreach (Vector3 point in patrols[slot]) center += point;
+                center /= patrols[slot].Length;
+                securityPosts[slot] = NavMesh.SamplePosition(center, out NavMeshHit hit, .4f, filter) &&
+                    AllowsFlight(hit.position) && CanConnect(patrols[slot][0], hit.position)
+                    ? hit.position : patrols[slot][0];
+                Group(Posts[index][slot] + " Security Post", transform).position = securityPosts[slot];
             }
             BuildGraph(body);
         }
@@ -374,7 +383,7 @@ namespace ShiftFour
                     PlanarDistanceSquared(point, approachGoals[i]) < 3.5f * 3.5f)
                     return false;
             approachGoals[slot] = point;
-            approachUntil[slot] = Time.time + .9f;
+            approachUntil[slot] = Time.time + 1.25f;
             return true;
         }
 

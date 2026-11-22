@@ -8,7 +8,7 @@ namespace ShiftFour
     // Owns the outdoor dispatch lifecycle. Prediction, flight and fire remain on the original Interceptor.
     internal sealed class OutdoorInterceptorResponse
     {
-        internal enum Phase { Standby, Alerted, Intercept, Attack, Search, Return, Destroyed }
+        internal enum Phase { Standby, Alerted, Intercept, Attack, Reposition, Search, Return, Destroyed }
 
         internal const float AttackDistance = 10f;
         private static readonly float[] ApproachAngles = { 0f, 45f, -45f, 90f, -90f, 135f, -135f, 180f };
@@ -23,20 +23,25 @@ namespace ShiftFour
         private float alertEnds, responseEnds, reportExpires, planAt, searchEnds, burstReadyAt;
         private int fired, searchStep;
         private bool seen, ahead;
+        private Vector3 lastBurstPost;
+        private int burstCount;
+        private bool relocationPlanned;
 
         internal Phase State { get; private set; }
-        internal bool IsResponding => State is Phase.Alerted or Phase.Intercept or Phase.Attack or Phase.Search;
+        internal bool IsResponding => State is Phase.Alerted or Phase.Intercept or Phase.Attack or Phase.Reposition or Phase.Search;
+        internal float LeadHorizon { get; }
         internal WaypointGraph Graph { get; private set; }
         internal Vector3[] Posts { get; }
 
         internal OutdoorInterceptorResponse(OutdoorScoutEncounter outdoors, NavMeshQueryFilter filter, Vector3 station,
-            List<Vector3> roadPosts, float pursuitTime, float pursuitDistance)
+            List<Vector3> roadPosts, float pursuitTime, float pursuitDistance, float leadHorizon)
         {
             this.outdoors = outdoors;
             this.filter = filter;
             this.station = station;
             this.pursuitTime = pursuitTime;
             this.pursuitDistance = pursuitDistance;
+            LeadHorizon = leadHorizon;
             Posts = new[] { station, station };
             foreach (Vector3 point in roadPosts)
                 if (Allows(point)) roads.Add(point);
@@ -85,19 +90,20 @@ namespace ShiftFour
             return distance / Mathf.Max(1f, speed) + 2f < pursuitTime;
         }
 
-        internal void Dispatch(Vector3 report, Vector3 destination, float distance, float speed)
+        internal void Dispatch(Vector3 report, Vector3 destination, float distance, float speed, float reaction)
         {
             float now = Time.time;
             State = Phase.Alerted;
             goal = destination;
             lastKnown = report;
-            alertEnds = now + .8f;
+            alertEnds = now + reaction;
             responseEnds = now + pursuitTime;
             reportExpires = now + Mathf.Min(pursuitTime, Mathf.Max(7f, distance / Mathf.Max(1f, speed) + 4f));
-            burstReadyAt = now + 1f;
+            burstReadyAt = now + Mathf.Max(.6f, reaction);
             planAt = searchEnds = 0f;
             fired = searchStep = 0;
-            seen = ahead = false;
+            burstCount = 0;
+            seen = ahead = relocationPlanned = false;
         }
 
         internal DecisionOption Decide(InterceptorBrain brain, InterceptorPolicy prediction, ControlTacticalRouteValidator routes,
@@ -123,13 +129,24 @@ namespace ShiftFour
             if (visible)
             {
                 searchEnds = 0f;
+                if (State == Phase.Reposition && now < burstReadyAt)
+                {
+                    if (!relocationPlanned)
+                    {
+                        relocationPlanned = true;
+                        goal = FindBurstPosition(position, playerPosition, routes);
+                    }
+                    return Option("Reposition between response bursts", goal);
+                }
+                if (State == Phase.Reposition) planAt = 0f;
                 if (now >= planAt)
                 {
-                    planAt = now + .36f;
+                    planAt = now + (brain.IsAggressive ? .28f : .4f);
                     PlanIntercept(prediction, routes, position, playerPosition, observedMotion, speed, ownVelocity, acceleration);
                 }
                 float distance = DistanceSquared(position, playerPosition);
-                if (distance <= AttackDistance * AttackDistance &&
+                float attackDistance = State == Phase.Attack ? AttackDistance : AttackDistance - .55f;
+                if (distance <= attackDistance * attackDistance &&
                     ((!ahead || distance <= 5.5f * 5.5f) || fired > 0))
                 {
                     State = Phase.Attack;
@@ -180,6 +197,12 @@ namespace ShiftFour
                     InterceptorPolicy.ValidRoute(policy.PlannedRoute);
                 if (ahead)
                     goal = prediction.Destination;
+                else if (policy.History.Count >= 3 && policy.Confidence >= .38f &&
+                    TryRoadLead(position, playerPosition, routes, speed, out Vector3 lead))
+                {
+                    ahead = true;
+                    goal = lead;
+                }
                 else if (FindStandoff(position, playerPosition, routes, out Vector3 approach, out _))
                     goal = approach;
                 else
@@ -188,11 +211,61 @@ namespace ShiftFour
             finally { routes.EndDecision(); }
         }
 
+        private bool TryRoadLead(Vector3 origin, Vector3 target, ControlTacticalRouteValidator routes, float speed,
+            out Vector3 lead)
+        {
+            lead = default;
+            float playerSpeed = Mathf.Min(motion.magnitude, 6f);
+            if (playerSpeed < .7f) return false;
+            Vector3 heading = motion.normalized;
+            float bestScore = float.NegativeInfinity;
+            foreach (Vector3 point in roads)
+            {
+                Vector3 offset = Flat(point - target);
+                float alignment = Vector3.Dot(offset.normalized, heading);
+                float flightEstimate = Vector3.Distance(origin, point) / Mathf.Max(1f, speed);
+                float travelTime = offset.magnitude / playerSpeed;
+                if (alignment < .75f || offset.sqrMagnitude < 16f ||
+                    travelTime > LeadHorizon || flightEstimate > travelTime + .9f) continue;
+
+                var playerRoute = routes.PlayerRoute(target, point);
+                if (!InterceptorPolicy.ValidRoute(playerRoute)) continue;
+                float playerTime = InterceptorPolicy.Length(playerRoute) / playerSpeed;
+                if (playerTime > LeadHorizon) continue;
+                var flightRoute = routes.Route(origin, point);
+                if (!InterceptorPolicy.ValidRoute(flightRoute)) continue;
+                float flightTime = InterceptorPolicy.Length(flightRoute) / Mathf.Max(1f, speed);
+                if (flightTime > playerTime + .75f) continue;
+                float score = alignment * 4f + Mathf.Min(playerTime - flightTime, 1f) - playerTime * .35f;
+                if (score <= bestScore) continue;
+                bestScore = score;
+                lead = point;
+            }
+            return float.IsFinite(bestScore);
+        }
+
         private bool PossibleRoad(Vector3 from, Vector3 to)
         {
             Vector3 offset = Flat(to - from);
-            return offset.sqrMagnitude < 26f * 26f && (motion.sqrMagnitude < .3f ||
+            float maxLead = Mathf.Min(26f, 6f * LeadHorizon);
+            return offset.sqrMagnitude <= maxLead * maxLead && (motion.sqrMagnitude < .3f ||
                 Vector3.Dot(offset.normalized, motion.normalized) > .35f);
+        }
+
+        private Vector3 FindBurstPosition(Vector3 origin, Vector3 target, ControlTacticalRouteValidator routes)
+        {
+            Vector3 away = Flat(lastBurstPost - target).normalized;
+            if (away.sqrMagnitude < .01f) return origin;
+            float side = burstCount % 2 == 0 ? 1f : -1f;
+            foreach (float angle in new[] { 58f * side, -58f * side, 33f * side, -33f * side })
+            {
+                Vector3 probe = target + Quaternion.Euler(0f, angle, 0f) * away * 6.4f;
+                probe.y = station.y;
+                if (!NavMesh.SamplePosition(probe, out NavMeshHit hit, 1f, filter) || !Allows(hit.position) ||
+                    DistanceSquared(lastBurstPost, hit.position) < 2.5f * 2.5f) continue;
+                if (InterceptorPolicy.ValidRoute(routes.Route(origin, hit.position))) return hit.position;
+            }
+            return origin;
         }
 
         private bool FindStandoff(Vector3 origin, Vector3 location, ControlTacticalRouteValidator validator,
@@ -225,6 +298,10 @@ namespace ShiftFour
             if (++fired < 2) return true;
             fired = 0;
             burstReadyAt = Time.time + 2.2f;
+            lastBurstPost = position;
+            burstCount++;
+            relocationPlanned = false;
+            State = Phase.Reposition;
             return true;
         }
 

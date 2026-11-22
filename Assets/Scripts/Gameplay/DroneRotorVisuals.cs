@@ -224,14 +224,17 @@ namespace ShiftFour
                 .6f + .4f * Mathf.Sin(failureAge * 100f) : 0f;
             var tintState = new Vector3(pose.FireFlash + failureFlash, pose.HitFlash, pose.ShutdownBlend);
             float alertWeight = dying ? 0f : pose.AlertBlend * (1f - Mathf.Max(pose.FireFlash, pose.HitFlash));
-            Color alert = alertWeight > 0f ? pose.AlertColor : Color.clear;
+            bool combatPulse = !dying && brain != null && brain.CombatAlertPulse;
+            Color alertColor = combatPulse ? new Color(1f, .13f, .09f) : pose.AlertColor;
+            if (combatPulse) alertWeight = Mathf.Max(alertWeight, .55f);
+            Color alert = alertWeight > 0f ? alertColor : Color.clear;
             alert.a = alertWeight;
             if (tintState == previousTint && alert == previousAlert) return;
             previousTint = tintState;
             previousAlert = alert;
             foreach (TintSlot tint in tints)
             {
-                Color color = Color.Lerp(tint.Color, pose.AlertColor, alertWeight);
+                Color color = Color.Lerp(tint.Color, alertColor, alertWeight);
                 color = Color.Lerp(color, Color.white, pose.FireFlash * .12f);
                 color = Color.Lerp(color, new Color(1f, .24f, .12f, tint.Color.a), pose.HitFlash * .8f);
                 color = Color.Lerp(color, new Color(.28f, .28f, .28f, tint.Color.a), pose.ShutdownBlend);
@@ -239,7 +242,8 @@ namespace ShiftFour
                 color.a = tint.Color.a;
                 tint.Animated.SetColor(tint.Property, color);
                 if (tint.HasEmission)
-                    tint.Animated.SetColor(EmissionColor, Color.Lerp(tint.Emission, Color.black, pose.ShutdownBlend));
+                    tint.Animated.SetColor(EmissionColor, combatPulse ? tint.Emission + alertColor * .45f :
+                        Color.Lerp(tint.Emission, Color.black, pose.ShutdownBlend));
                 tint.Renderer.SetPropertyBlock(tint.Animated, tint.Index);
             }
         }

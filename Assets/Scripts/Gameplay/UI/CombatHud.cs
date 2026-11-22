@@ -41,13 +41,21 @@ namespace ShiftFour
         public float DamageFlashStrength => Mathf.Clamp01(1 - (Time.unscaledTime - damageAt) / .55f);
         public bool DamageDirectionKnown => knownOrigin && Time.unscaledTime - damageAt < .85f;
         public int VisibleDroneBarCount { get; private set; }
+        private bool prototype;
 
         public void Initialize(GameSession game, PlayerController actor, DroneBrain[] targets)
+            => Initialize(game, actor, targets, false);
+
+        internal void InitializePrototype(PlayerController actor, DroneBrain[] targets)
+            => Initialize(null, actor, targets, true);
+
+        private void Initialize(GameSession game, PlayerController actor, DroneBrain[] targets, bool prototypeOnly)
         {
             Unbind();
+            prototype = prototypeOnly;
             session = game; player = actor;
             health = player != null ? player.GetComponent<Health>() : null;
-            weapons = player != null ? player.Weapons : null;
+            weapons = !prototype && player != null ? player.Weapons : null;
             drones.Clear();
             if (targets != null) foreach (var target in targets)
             {
@@ -69,7 +77,7 @@ namespace ShiftFour
         private void Bind()
         {
             if (bound || health == null) return;
-            health.Damaged += OnPlayerDamage;
+            if (!prototype) health.Damaged += OnPlayerDamage;
             if (weapons != null) weapons.ShotAccepted += OnShot;
             foreach (var bar in drones) if (bar.Health != null) bar.Health.Damaged += bar.Listener;
             bound = true;
@@ -109,7 +117,7 @@ namespace ShiftFour
         }
         private void OnDroneDamage(DroneBar bar, DamageRecord damage)
         {
-            if (damage.Attacker != player || damage.Before <= damage.After || session == null || session.Ended) return;
+            if (damage.Attacker != player || damage.Before <= damage.After || !CanShowCombat) return;
             bar.RevealUntil = Time.unscaledTime + 3;
             bar.Trail = Mathf.Max(bar.Trail, damage.Before / Mathf.Max(1, bar.Health.Maximum));
             hitUntil = Time.unscaledTime + .22f;
@@ -117,8 +125,16 @@ namespace ShiftFour
         }
         private void OnShot(WeaponShot _) => shotAt = Time.unscaledTime;
 
+        private bool CanShowCombat => prototype ? player != null && player.isActiveAndEnabled && health != null && health.IsAlive :
+            session != null && !session.Ended;
+
         private void Update()
         {
+            if (prototype)
+            {
+                UpdateDroneBars(Mathf.Min(Time.unscaledDeltaTime, .1f), Time.unscaledTime);
+                return;
+            }
             if (session == null || player == null || health == null || !session.isActiveAndEnabled) return;
             float dt = Mathf.Min(Time.unscaledDeltaTime, .1f), now = Time.unscaledTime;
             if (!Mathf.Approximately(maximum, health.Maximum))
@@ -133,15 +149,16 @@ namespace ShiftFour
         private void UpdateDroneBars(float dt, float now)
         {
             VisibleDroneBarCount = 0;
-            var camera = player.ViewCamera;
+            var camera = player != null ? player.ViewCamera : null;
             if (camera == null) return;
             Health aimed = null;
-            if (!session.Ended && Physics.Raycast(camera.transform.position, camera.transform.forward, out var aim,
+            bool show = CanShowCombat;
+            if (!prototype && show && Physics.Raycast(camera.transform.position, camera.transform.forward, out var aim,
                 30, WeaponController.GameplayRaycastMask, QueryTriggerInteraction.Ignore)) aimed = aim.collider.GetComponentInParent<Health>();
             foreach (var bar in drones)
             {
                 bar.Visible = false;
-                if (session.Ended || bar.Brain == null || bar.Health == null || !bar.Health.IsAlive)
+                if (!show || bar.Brain == null || bar.Health == null || !bar.Health.IsAlive)
                 { bar.Alpha = 0; continue; }
                 if (aimed == bar.Health) bar.RevealUntil = Mathf.Max(bar.RevealUntil, now + .65f);
                 bool reveal = now < bar.RevealUntil;
@@ -179,6 +196,12 @@ namespace ShiftFour
         }
         private void OnGUI()
         {
+            if (prototype)
+            {
+                if (CanShowCombat && VisibleDroneBarCount > 0 && Event.current.type == EventType.Repaint)
+                    presentation.DrawPrototypeBars(drones);
+                return;
+            }
             if (session == null || !session.isActiveAndEnabled || player == null || health == null) return;
             if (Event.current.type != EventType.Repaint && !session.Ended &&
                 session.Phase != GameSession.LaunchPhase.NameEntry &&

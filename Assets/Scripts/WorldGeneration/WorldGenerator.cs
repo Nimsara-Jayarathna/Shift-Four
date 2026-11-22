@@ -52,6 +52,7 @@ namespace ShiftFour
         [SerializeField, Range(.5f, 10f)] private float scoutSearchDuration = 3.5f;
         [SerializeField, Range(.5f, 1.5f), Tooltip("Scales detection range for all four indoor Guard zones.")]
         private float guardDetectionScale = 1f;
+        [SerializeField, Range(90f, 175f)] private float guardFieldOfView = 160f;
         [SerializeField] private Transform fixedLayout;
         [SerializeField] private Transform spawn;
         [SerializeField] private PrototypeMaterials materials;
@@ -65,14 +66,39 @@ namespace ShiftFour
         [SerializeField, Range(12f, 35f)] private float flankerAmbushRadius = 23f;
         [SerializeField, Range(18f, 45f)] private float flankerPursuitLimit = 33f;
         [SerializeField, Range(5f, 15f)] private float flankerAttackDistance = 9f;
+        [SerializeField, Range(.25f, 1.2f)] private float flankerReplanInterval = .45f;
+        [SerializeField, Range(0f, 1f)] private float flankerPredictionSeconds = .45f;
 
         [Header("Outdoor Interceptor response")]
         [SerializeField, Range(2f, 30f)] private float interceptorResponseCooldown = 8f;
         [SerializeField, Range(8f, 45f)] private float interceptorPursuitTime = 28f;
         [SerializeField, Range(25f, 180f)] private float interceptorPursuitDistance = 110f;
+        [SerializeField, Range(1.5f, 6f)] private float interceptorLeadHorizon = 4f;
+
+        [Header("Prototype drone combat")]
+        [SerializeField, Range(5, 7)] private int outdoorScoutCount = 7;
+        [SerializeField, Range(3, 5)] private int outdoorFlankerCount = 5;
+        [SerializeField, Range(1, 3)] private int outdoorInterceptorCount = 3;
+        [Tooltip("Maximum distinct outdoor attackers in a rolling 1.35 second window.")]
+        [SerializeField, Range(1, 3)] private int outdoorAttackLimit = 2;
+        [Tooltip("Maximum Interceptors actively responding to Scout sightings at once.")]
+        [SerializeField, Range(1, 3)] private int interceptorResponseLimit = 1;
+        [SerializeField] private DroneCombatTempo guardTempo = new DroneCombatTempo(1.2f, .34f);
+        [SerializeField] private DroneCombatTempo scoutTempo = new DroneCombatTempo(1.4f, .46f);
+        [SerializeField] private DroneCombatTempo flankerTempo = new DroneCombatTempo(1.55f, .63f);
+        [SerializeField] private DroneCombatTempo interceptorTempo = new DroneCombatTempo(1.65f, .52f);
 
         private OutdoorPlayerEquipment equipment;
         private WeaponDefinition supplyPistol;
+        private DroneBrain[] combatDrones = Array.Empty<DroneBrain>();
+        private OutdoorScoutEncounter outdoorCombat;
+
+        public int OutdoorScoutCount => Mathf.Clamp(outdoorScoutCount, 5, OutdoorScoutRoutes.Names.Length);
+        public int OutdoorFlankerCount => Mathf.Clamp(outdoorFlankerCount, 3, 5);
+        public int OutdoorInterceptorCount => Mathf.Clamp(outdoorInterceptorCount, 1, 3);
+        public int OutdoorAttackLimit => Mathf.Clamp(outdoorAttackLimit, 1, 3);
+        public int InterceptorResponseLimit => Mathf.Clamp(interceptorResponseLimit, 1, OutdoorInterceptorCount);
+        public int GeneratedSeed { get; private set; }
 
         public void Configure(Transform fallback, Transform playerSpawn, PrototypeMaterials palette, GameObject scout = null)
         {
@@ -117,6 +143,9 @@ namespace ShiftFour
             if (previous == null) return;
             Discard(previous);
             generatedContent = null;
+            combatDrones = Array.Empty<DroneBrain>();
+            outdoorCombat = null;
+            spawn?.GetComponentInChildren<PrototypePlayerFeedback>()?.SetDroneTargets(combatDrones);
             if (fixedLayout != null) fixedLayout.gameObject.SetActive(true);
             ResetPlayer(fixedLayout);
             MarkSceneDirty();
@@ -185,6 +214,7 @@ namespace ShiftFour
             if (previous != null) Discard(previous);
             fixedLayout.gameObject.SetActive(false);
             generatedContent = next;
+            GeneratedSeed = layoutSeed;
             next.gameObject.SetActive(true);
             if (Application.isPlaying && gameObject.scene == UnityEngine.SceneManagement.SceneManager.GetActiveScene())
                 OutdoorScenery.ApplyLighting(RenderSettings.sun);
@@ -201,13 +231,13 @@ namespace ShiftFour
             {
                 var player = spawn.GetComponentInChildren<PlayerController>();
                 var ambushes = flankerPrefab != null
-                    ? OutdoorFlankerAmbushes.Prepare(next, spawn.position, boundary, materials, layoutSeed) : null;
-                var patrols = OutdoorScoutEncounter.Build(next, scoutPrefab, spawn.position, boundary, layoutSeed,
+                    ? OutdoorFlankerAmbushes.Prepare(next, spawn.position, boundary, materials, layoutSeed, OutdoorFlankerCount) : null;
+                var patrols = OutdoorScoutEncounter.Build(next, scoutPrefab, spawn.position, boundary, layoutSeed, OutdoorAttackLimit,
                     guardPrefab, interceptorPrefab, flankerPrefab);
                 OutdoorScout extractionScout = patrols != null ? patrols.Deploy(scoutPrefab, player, layoutSeed,
                     EncounterSetting(scoutFlightHeight, 2.1f, 1.7f, 3.5f), EncounterSetting(scoutDetectionRange, 24f, 6f, 40f),
                     EncounterSetting(scoutFieldOfView, 115f, 40f, 170f), EncounterSetting(scoutPursuitDistance, 22f, 8f, 35f),
-                    EncounterSetting(scoutSearchDuration, 3.5f, .5f, 10f), materials, font) : null;
+                    EncounterSetting(scoutSearchDuration, 3.5f, .5f, 10f), materials, OutdoorScoutCount) : null;
                 FlankerBrain extractionFlanker = null;
                 if (patrols != null && ambushes != null)
                 {
@@ -216,20 +246,26 @@ namespace ShiftFour
                         EncounterSetting(flankerDamage, 9f, 2f, 25f), EncounterSetting(flankerShotInterval, .42f, .25f, 1.2f),
                         EncounterSetting(flankerRecoveryCooldown, 3.6f, 1.6f, 8f), radius,
                         EncounterSetting(flankerPursuitLimit, 33f, radius + 2f, 45f),
-                        EncounterSetting(flankerAttackDistance, 9f, 5f, 15f));
-                    extractionFlanker = ambushes.Deploy(flankerPrefab, player, patrols, settings, materials, font, layoutSeed);
+                        EncounterSetting(flankerAttackDistance, 9f, 5f, 15f),
+                        EncounterSetting(flankerReplanInterval, .45f, .25f, 1.2f),
+                        EncounterSetting(flankerPredictionSeconds, .45f, 0f, 1f));
+                    extractionFlanker = ambushes.Deploy(flankerPrefab, player, patrols, settings, layoutSeed);
                 }
                 var interceptors = patrols != null ? OutdoorInterceptorDispatch.Deploy(next, patrols, interceptorPrefab,
                     player, boundary, EncounterSetting(interceptorResponseCooldown, 8f, 2f, 30f),
                     EncounterSetting(interceptorPursuitTime, 28f, 8f, 45f),
-                    EncounterSetting(interceptorPursuitDistance, 110f, 25f, 180f), materials, font, layoutSeed) : null;
+                    EncounterSetting(interceptorPursuitDistance, 110f, 25f, 180f),
+                    EncounterSetting(interceptorLeadHorizon, 4f, 1.5f, 6f),
+                    OutdoorInterceptorCount, InterceptorResponseLimit, layoutSeed) : null;
                 player?.GetComponent<PrototypePlayerFeedback>()?.SetOutdoorEncounters(patrols, ambushes, interceptors);
                 float detectionScale = float.IsNaN(guardDetectionScale) ? 1f : Mathf.Clamp(guardDetectionScale, .5f, 1.5f);
                 GuardBrain extractionGuard = IndoorGuardZone.Deploy(next, guardPrefab, player,
-                    detectionScale, materials, font, layoutSeed);
+                    detectionScale, EncounterSetting(guardFieldOfView, 160f, 90f, 175f), layoutSeed);
                 if (patrols != null)
                     foreach (var zone in next.GetComponentsInChildren<IndoorGuardZone>())
                         zone.ListenForScoutAlerts(patrols);
+                ConfigureDroneCombat(next, patrols);
+                player?.GetComponent<PrototypePlayerFeedback>()?.SetDroneTargets(combatDrones);
                 var extractionGate = next.GetComponentInChildren<OpenWorldExtractionGate>();
                 if (extractionGate != null)
                     Debug.Log($"Open World extraction: spawned {extractionGate.name} at {extractionGate.transform.position} on seed {layoutSeed}, behind Spawn at the south end of the avenue.", extractionGate);
@@ -248,6 +284,45 @@ namespace ShiftFour
                 }
             }
             return true;
+        }
+
+        private void OnEnable() => SoundEvents.NoiseEmitted += OnPrototypeGunfire;
+        private void OnDisable() => SoundEvents.NoiseEmitted -= OnPrototypeGunfire;
+
+        private void ConfigureDroneCombat(Transform layout, OutdoorScoutEncounter outdoors)
+        {
+            outdoorCombat = outdoors;
+            combatDrones = layout.GetComponentsInChildren<DroneBrain>();
+            for (int slot = 0; slot < combatDrones.Length; slot++)
+            {
+                DroneBrain drone = combatDrones[slot];
+                var tuning = drone switch
+                {
+                    GuardBrain => guardTempo.Validated(new DroneCombatTempo(1.2f, .34f)),
+                    ScoutBrain => scoutTempo.Validated(new DroneCombatTempo(1.4f, .46f)),
+                    FlankerBrain => flankerTempo.Validated(new DroneCombatTempo(1.55f, .63f)),
+                    _ => interceptorTempo.Validated(new DroneCombatTempo(1.65f, .52f))
+                };
+                // 1911 body shots deal about 18.3 HP after the shared combat duration scaling.
+                float maximum = drone switch { ScoutBrain => 35f, GuardBrain => 48f, FlankerBrain => 54f, _ => 51f };
+                drone.ConfigurePrototypeCombat(tuning, slot, maximum, drone is GuardBrain ? null : outdoors);
+            }
+        }
+
+        private void OnPrototypeGunfire(NoiseEvent noise)
+        {
+            // WeaponController.ReportShot uses an empty source. Drone weapons report their own component.
+            if (!Application.isPlaying || noise.Category != NoiseCategory.Gunshot || noise.Source != null) return;
+            bool outside = outdoorCombat != null && outdoorCombat.AllowsTarget(noise.Position);
+            foreach (DroneBrain drone in combatDrones)
+            {
+                if (drone == null || !drone.gameObject.activeInHierarchy ||
+                    (drone.transform.position - noise.Position).sqrMagnitude > 14f * 14f ||
+                    (drone is GuardBrain ? !drone.CanReactToGunfire(noise.Position) : !outside)) continue;
+                drone.ReactToThreat();
+                if (drone is ScoutBrain && drone.TryGetComponent<OutdoorScout>(out var scout))
+                    scout.HearPlayerGunfire(noise.Position);
+            }
         }
 
         private static float EncounterSetting(float value, float fallback, float min, float max)

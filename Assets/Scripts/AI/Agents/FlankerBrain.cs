@@ -59,10 +59,10 @@ namespace ShiftFour
             if (ambush != null)
             {
                 routes ??= new FlankerRoutes(this, NavigationGraph);
-                Vector3 movement = Vector3.ProjectOnPlane(playerBody.velocity, Vector3.up);
-                if (movement.sqrMagnitude < .36f) movement = ObservedVelocity;
-                if (movement.sqrMagnitude < .36f) movement = Player.transform.forward;
-                var decision = ambush.Decide(this, routes, visible, playerPosition, movement.normalized);
+                Vector3 movement = visible ? Vector3.ProjectOnPlane(playerBody.velocity, Vector3.up) : Vector3.zero;
+                if (visible && movement.sqrMagnitude < .36f) movement = ObservedVelocity;
+                var decision = ambush.Decide(this, routes, visible, playerPosition, movement,
+                    visible ? Player.transform.forward : Vector3.zero);
                 Motor.SetMovementMode(ambush.State is OutdoorFlankerAmbush.Phase.Flanking or OutdoorFlankerAmbush.Phase.Reposition
                     ? DroneMovementMode.Chase : DroneMovementMode.Patrol);
                 DecisionTrace = decision.Name;
@@ -98,7 +98,7 @@ namespace ShiftFour
 
         private void LateUpdate()
         {
-            if (ambush == null || !Alive || Player == null ||
+            if (HasPrototypeTempo || ambush == null || !Alive || Player == null ||
                 ambush.State is not (OutdoorFlankerAmbush.Phase.Warning or OutdoorFlankerAmbush.Phase.Attack)) return;
             Vector3 heading = Vector3.ProjectOnPlane(Player.transform.position - transform.position, Vector3.up);
             if (heading.sqrMagnitude > .01f)

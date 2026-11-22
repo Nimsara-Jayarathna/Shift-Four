@@ -24,9 +24,16 @@ namespace ShiftFour
         private CheckpointAccessDoor checkpointDoor;
         private BuildingAccessDoor serverDoor, controlDoor, storageDoor;
         private OutdoorPlayerEquipment equipment;
+        private CombatHud droneBars;
         private BoxCollider checkpointFloor, serverFloor, controlFloor, storageFloor;
         private GUIStyle titleStyle, objectiveStyle, detailStyle, victoryStyle;
         public OpenWorldMissionManager ExtractionManager => extraction;
+
+        internal void SetDroneTargets(DroneBrain[] targets)
+        {
+            if (droneBars == null && targets.Length > 0) droneBars = gameObject.AddComponent<CombatHud>();
+            if (droneBars != null) droneBars.InitializePrototype(GetComponent<PlayerController>(), targets);
+        }
 
         internal void SetOutdoorEncounters(OutdoorScoutEncounter patrols, OutdoorFlankerAmbushes ambushes,
             OutdoorInterceptorDispatch interceptors)

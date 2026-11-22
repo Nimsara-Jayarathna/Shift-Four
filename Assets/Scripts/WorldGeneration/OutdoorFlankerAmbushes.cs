@@ -9,9 +9,10 @@ namespace ShiftFour
     internal readonly struct FlankerAmbushSettings
     {
         internal readonly float Detection, Damage, ShotInterval, Recovery, Radius, Pursuit, AttackRange;
+        internal readonly float ReplanInterval, LeadSeconds;
 
         internal FlankerAmbushSettings(float detection, float damage, float shotInterval, float recovery,
-            float radius, float pursuit, float attackRange)
+            float radius, float pursuit, float attackRange, float replanInterval, float leadSeconds)
         {
             Detection = detection;
             Damage = damage;
@@ -20,23 +21,31 @@ namespace ShiftFour
             Radius = radius;
             Pursuit = pursuit;
             AttackRange = attackRange;
+            ReplanInterval = replanInterval;
+            LeadSeconds = leadSeconds;
         }
     }
 
     [DisallowMultipleComponent]
     internal sealed class OutdoorFlankerAmbushes : MonoBehaviour
     {
-        private static readonly string[] Names = { "Checkpoint to Server", "Server to Control", "Control to Storage" };
-        private static readonly string[] Buildings = { "Checkpoint", "Control", "Storage" };
-        private static readonly int[] BuildingIndices = { 0, 2, 3 };
+        private static readonly string[] Names =
+            { "Checkpoint to Server", "Server to Control", "Control to Storage", "Server Service Road", "North Perimeter" };
+        private static readonly string[] Buildings = { "Checkpoint", "Control", "Storage", "Server", "Control" };
+        private static readonly int[] BuildingIndices = { 0, 2, 3, 1, 2 };
+        private static readonly Vector3[] PerimeterOffsets =
+        {
+            Vector3.zero, Vector3.right * 6f, Vector3.left * 6f, Vector3.right * 12f, Vector3.left * 12f,
+            Vector3.back * 6f, Vector3.right * 18f, Vector3.left * 18f
+        };
 
         private Transform world;
         private BoxCollider[] roads;
         private float boundary;
         private Vector3 spawn;
         private Transform supply;
-        private readonly Vector3[] centers = new Vector3[3];
-        private readonly Vector3[] preferredPosts = new Vector3[3];
+        private Vector3[] centers;
+        private Vector3[] preferredPosts;
         private OutdoorScoutEncounter outdoors;
         private FlankerBrain active;
         private Health activeHealth;
@@ -46,7 +55,7 @@ namespace ShiftFour
         private bool LiveAmbush => active != null && active.isActiveAndEnabled && activeHealth != null && activeHealth.IsAlive;
 
         internal static OutdoorFlankerAmbushes Prepare(Transform world, Vector3 spawn, float boundary,
-            PrototypeMaterials materials, int seed)
+            PrototypeMaterials materials, int seed, int count)
         {
             var result = Group("OutdoorFlankerAmbushes", world).gameObject.AddComponent<OutdoorFlankerAmbushes>();
             result.world = world;
@@ -54,6 +63,8 @@ namespace ShiftFour
             result.boundary = boundary;
             result.supply = world.Find(OutdoorSupplyCache.HierarchyName);
             result.roads = world.Find("Roads").GetComponentsInChildren<BoxCollider>();
+            result.centers = new Vector3[count];
+            result.preferredPosts = new Vector3[count];
             result.PlaceShelters(materials, seed);
             return result;
         }
@@ -67,11 +78,16 @@ namespace ShiftFour
             centers[0] = world.TransformPoint(new Vector3(0f, 0f, Mathf.Lerp(checkpoint.z, server.z, .43f)));
             centers[1] = BranchCenter("Control branch", .53f);
             centers[2] = BranchCenter("Storage branch", .62f);
-
+            if (centers.Length > 3) centers[3] = BranchCenter("Server branch", .66f);
             for (int i = 0; i < centers.Length; i++)
             {
+                if (i == 4)
+                {
+                    float lateral = (float)random.NextDouble() * 6f;
+                    centers[i] = world.TransformPoint(new Vector3(-boundary * .28f + lateral, 0f, boundary - 13f));
+                }
                 Vector3 along = i == 0 ? world.forward : world.right;
-                Vector3 shoulder = i == 0 ? -world.right : i == 1 ? world.forward : -world.forward;
+                Vector3 shoulder = i == 0 ? -world.right : i is 1 or 3 ? world.forward : -world.forward;
                 float side = i == 0 ? 12.4f : 8.5f;
                 preferredPosts[i] = centers[i] + shoulder * side;
                 float jitter = (float)random.NextDouble() * 1.4f - .7f;
@@ -126,7 +142,7 @@ namespace ShiftFour
         }
 
         internal FlankerBrain Deploy(GameObject prefab, PlayerController player, OutdoorScoutEncounter outdoorNavigation,
-            FlankerAmbushSettings settings, PrototypeMaterials materials, Font font, int seed)
+            FlankerAmbushSettings settings, int seed)
         {
             outdoors = outdoorNavigation;
             var agent = prefab != null ? prefab.GetComponent<NavMeshAgent>() : null;
@@ -141,8 +157,7 @@ namespace ShiftFour
             FlankerBrain extractionFlanker = null;
             for (int i = 0; i < centers.Length; i++)
             {
-                var zone = new OutdoorFlankerAmbush(this, centers[i], i, settings, filter);
-                if (!FindPost(zone, preferredPosts[i], body, filter, out Vector3 post))
+                if (!TryPlaceZone(i, settings, body, filter, out OutdoorFlankerAmbush zone, out Vector3 post))
                 {
                     Debug.LogWarning($"Open World: no clear {Names[i]} Flanker staging position on seed {seed}.", this);
                     continue;
@@ -150,16 +165,43 @@ namespace ShiftFour
 
                 zone.SetPost(post);
                 Transform group = Group($"{i + 1:00} {Names[i]}", transform);
-                group.position = centers[i];
+                group.position = zone.Center;
                 WaypointGraph graph = BuildGraph(group, zone, post, body, filter);
                 zone.SetGraph(graph, graph.NodeCount > 1 ? graph.NodePosition(1) : post);
-                Material accent = i == 0 ? materials.Checkpoint : i == 1 ? materials.Control : materials.Storage;
                 FlankerBrain flanker = OutdoorDroneEncounter.Spawn<FlankerBrain>(world, prefab, player, Buildings[i],
-                    BuildingIndices[i], $"Flanker {i + 1:00}", accent, materials, font, seed, group, "Ambush Post",
+                    BuildingIndices[i], $"Flanker {i + 1:00}", seed, group, "Ambush Post",
                     ambush: zone);
                 if (i == 2) extractionFlanker = flanker;
             }
             return extractionFlanker;
+        }
+
+        private bool TryPlaceZone(int slot, FlankerAmbushSettings settings, DroneBody body, NavMeshQueryFilter filter,
+            out OutdoorFlankerAmbush zone, out Vector3 post)
+        {
+            Vector3 center = centers[slot];
+            if (slot != 4)
+            {
+                zone = new OutdoorFlankerAmbush(this, center, slot, settings, filter);
+                return FindPost(zone, preferredPosts[slot], body, filter, out post);
+            }
+
+            // A seed can put trees or rocks over the perimeter approach itself. Find a nearby
+            // walkable approach and then require the ambush post to be connected to it.
+            foreach (Vector3 offset in PerimeterOffsets)
+            {
+                Vector3 candidate = center + world.TransformDirection(offset);
+                if (!NavMesh.SamplePosition(candidate, out NavMeshHit hit, 3.5f, filter) ||
+                    Mathf.Abs(world.InverseTransformPoint(hit.position).y) > .3f ||
+                    !outdoors.AllowsTarget(hit.position)) continue;
+                zone = new OutdoorFlankerAmbush(this, hit.position, slot, settings, filter);
+                if (FindPost(zone, preferredPosts[slot] + hit.position - center, body, filter, out post))
+                    return true;
+            }
+
+            zone = null;
+            post = default;
+            return false;
         }
 
         private bool FindPost(OutdoorFlankerAmbush zone, Vector3 preferred, DroneBody body, NavMeshQueryFilter filter,
@@ -171,7 +213,7 @@ namespace ShiftFour
             {
                 Vector3 candidate = preferred + Quaternion.Euler(0f, angle * 30f, 0f) * Vector3.forward * radius;
                 if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, 1.2f, filter) && ClearShoulder(hit.position) &&
-                    zone.CanTravel(hit.position) && System.Array.TrueForAll(occupied,
+                    zone.CanConnect(hit.position, zone.Center) && System.Array.TrueForAll(occupied,
                         drone => OutdoorScoutEncounter.FlatDistanceSquared(drone.transform.position, hit.position) >= 3.5f * 3.5f) &&
                     !Physics.CheckBox(hit.position + body.EnvelopeCenter, body.EnvelopeExtents, Quaternion.identity,
                         WeaponController.GameplayRaycastMask, QueryTriggerInteraction.Ignore))

@@ -250,13 +250,33 @@ namespace ShiftFour
             if (recovering)
                 Fill(new Rect(49, h - 57, 248 * Mathf.Clamp01(fraction), 2), new Color(.68f, 1, .87f, .4f + .2f * Mathf.Sin(Time.unscaledTime * 5)));
         }
-        private void DrawDroneBar(CombatHud.DroneBar bar, float scale, float w, float h)
+        internal void DrawPrototypeBars(List<CombatHud.DroneBar> drones)
+        {
+            Matrix4x4 previous = GUI.matrix;
+            Color previousColor = GUI.color;
+            float scale = Mathf.Max(.1f, Mathf.Min(Screen.width / 1280f, Screen.height / 720f));
+            GUI.matrix = Matrix4x4.Scale(Vector3.one * scale);
+            try
+            {
+                foreach (CombatHud.DroneBar bar in drones)
+                    if (bar.Visible && bar.Health != null && bar.Health.IsAlive)
+                        DrawDroneBar(bar, scale, Screen.width / scale, Screen.height / scale, showName: false);
+            }
+            finally
+            {
+                GUI.matrix = previous;
+                GUI.color = previousColor;
+            }
+        }
+
+        private void DrawDroneBar(CombatHud.DroneBar bar, float scale, float w, float h, bool showName = true)
         {
             Vector2 p = bar.ScreenPoint / scale;
             float x = Mathf.Clamp(p.x - 70, 20, w - 160), y = Mathf.Clamp(p.y - 20, 4, h - 34);
             Color background = Ink; background.a *= bar.Alpha;
             Fill(new Rect(x - 7, y - 3, 154, 30), background);
-            Label(new Rect(x, y, 140, 16), bar.Label + "   " + Mathf.CeilToInt(bar.Health.Current) + " / " + Mathf.CeilToInt(bar.Health.Maximum), 10,
+            string hp = Mathf.CeilToInt(bar.Health.Current) + " / " + Mathf.CeilToInt(bar.Health.Maximum);
+            Label(new Rect(x, y, 140, 16), showName ? bar.Label + "   " + hp : hp, 10,
                 new Color(White.r, White.g, White.b, bar.Alpha));
             Fill(new Rect(x, y + 19, 140, 4), new Color(.22f, .12f, .14f, bar.Alpha));
             Fill(new Rect(x, y + 19, 140 * Mathf.Clamp01(bar.Trail), 4), new Color(.9f, .56f, .41f, bar.Alpha));

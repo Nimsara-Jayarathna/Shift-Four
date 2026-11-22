@@ -13,7 +13,6 @@ namespace ShiftFour
 
         private const float AttackRange = 8f;
         private const float ShotInterval = 2.15f;
-        private const float AlertWindup = .65f;
         private const float FacingTolerance = 12f;
         private ScoutBrain source;
         private PlayerController player;
@@ -35,20 +34,28 @@ namespace ShiftFour
         private bool engaged, reportedCover, reportedDamage;
         private float nextDecision, nextShot, lastSeenAt = float.NegativeInfinity, attackAllowedAt;
         private float nextRouteAttempt;
+        private Vector3 heardPosition;
+        private float investigateSoundUntil;
+        private Vector3 searchGoal;
+        private int searchStep;
+        private float nextSearchStep;
+        private bool haveSearchGoal;
+        private static readonly Vector3[] SearchOffsets =
+            { Vector3.zero, Vector3.right * 3f, Vector3.back * 3f, Vector3.left * 3f, Vector3.forward * 3f };
         private Renderer statusStripe;
         private MaterialPropertyBlock statusTint;
         private static readonly int TintColor = Shader.PropertyToID("_BaseColor");
         private static readonly Color AlertColor = new Color(1f, .37f, .07f);
         private int post = 1;
 
-        public Activity State { get; private set; }
+        [field: SerializeField] public Activity State { get; private set; }
         public int PatrolPost => post + 1;
 
         internal Transform Marker => marker;
 
         internal void Configure(ScoutBrain prefabBrain, PlayerController target, Vector3[] posts,
             OutdoorScoutEncounter owner, float range, float fieldOfView, float limit, float searchDuration,
-            Transform nameplate, Renderer stripe)
+            Transform sensor, Renderer stripe)
         {
             source = prefabBrain;
             player = target;
@@ -58,7 +65,7 @@ namespace ShiftFour
             viewCosine = Mathf.Cos(fieldOfView * .5f * Mathf.Deg2Rad);
             leash = limit;
             searchTime = searchDuration;
-            marker = nameplate;
+            marker = sensor;
             statusStripe = stripe;
             statusTint = new MaterialPropertyBlock();
         }
@@ -85,7 +92,8 @@ namespace ShiftFour
                 Debug.LogWarning("Outdoor Scout: the prefab weapon mount or shot effects are missing.", this);
             source.Configure(name, patrol[0]);
             source.InitializeDifficulty();
-            if (source.DifficultyProfile != null) motor.InitializeMovement(source.DifficultySettings);
+            if (source.DifficultyProfile != null) motor.InitializeMovement(source.MovementSettings);
+            nextDecision = Time.time + source.PrototypeDecisionOffset;
             health.Died += OnDied;
             Debug.Log($"Outdoor Scout AI initialized with player '{player.name}', {detectionRange:0.#} m detection, and {patrol.Length} posts. " +
                 $"Starting patrol toward Post {PatrolPost}.", this);
@@ -94,7 +102,7 @@ namespace ShiftFour
         private void Update()
         {
             if (!health.IsAlive || Time.time < nextDecision) return;
-            nextDecision = Time.time + .18f;
+            nextDecision = Time.time + (source.IsAggressive ? .085f : .14f) + source.PrototypeDecisionOffset * .11f;
             if (!agent.isOnNavMesh)
             {
                 WarnNavigation("lost its NavMesh binding");
@@ -110,25 +118,34 @@ namespace ShiftFour
             bool visible = canPursue && distance <= detectionRange && inView && PlayerHit(origin, out _);
             if (visible)
             {
+                source.ConfirmPrototypeSight();
                 if (!engaged)
                 {
                     engaged = true;
                     contactOrigin = transform.position;
-                    attackAllowedAt = Time.time + AlertWindup;
+                    attackAllowedAt = Time.time + source.ReactionSeconds(.65f);
                     SetAlertStripe(true);
                     encounter.PublishAlert(this, target);
                     Debug.Log($"{name} detected {player.name} at {distance:0.0} m.", this);
                 }
                 lastSeen = target;
                 lastSeenAt = Time.time;
+                haveSearchGoal = false;
+                searchStep = 0;
+                nextSearchStep = 0f;
                 aimPoint = player.EyePosition;
                 if (Time.time < attackAllowedAt)
                 {
                     State = Activity.Alert;
-                    Hold();
+                    if (distance <= AttackRange) Hold();
+                    else
+                    {
+                        motor.SetMovementMode(DroneMovementMode.Chase);
+                        Travel(lastSeen);
+                    }
                     return;
                 }
-                if (distance <= AttackRange && TryAttack()) return;
+                if (distance <= AttackRange && source.ReadyForPrototypeShot && TryAttack()) return;
                 State = Activity.Chase;
                 motor.SetMovementMode(DroneMovementMode.Chase);
                 Travel(lastSeen);
@@ -140,7 +157,7 @@ namespace ShiftFour
             {
                 State = Activity.Investigate;
                 motor.SetMovementMode(DroneMovementMode.Investigate);
-                Travel(lastSeen);
+                SearchLastSighting();
                 return;
             }
             if (engaged)
@@ -150,6 +167,18 @@ namespace ShiftFour
                 reportedCover = reportedDamage = false;
                 post = ClosestPost();
                 SetAlertStripe(false);
+            }
+            if (!engaged && playerHealth.IsAlive && Time.time < investigateSoundUntil && player.isActiveAndEnabled)
+            {
+                State = Activity.Investigate;
+                motor.SetMovementMode(DroneMovementMode.Investigate);
+                Travel(heardPosition);
+                return;
+            }
+            if (State == Activity.Investigate)
+            {
+                State = Activity.ReturnToPatrol;
+                post = ClosestPost();
             }
 
             motor.SetMovementMode(DroneMovementMode.Patrol);
@@ -163,6 +192,36 @@ namespace ShiftFour
 
         private bool WithinLeash(Vector3 point)
             => OutdoorScoutEncounter.FlatDistanceSquared(point, contactOrigin) <= leash * leash;
+
+        private void SearchLastSighting()
+        {
+            if (Time.time >= nextSearchStep && (!haveSearchGoal ||
+                Vector3.Distance(transform.position, searchGoal) < agent.stoppingDistance + .45f))
+            {
+                nextSearchStep = Time.time + .5f;
+                haveSearchGoal = false;
+                while (searchStep < SearchOffsets.Length)
+                {
+                    Vector3 probe = lastSeen + SearchOffsets[searchStep++];
+                    if (!encounter.AllowsTarget(probe) || !WithinLeash(probe) ||
+                        !NavMesh.SamplePosition(probe, out NavMeshHit hit, 1f, agent.areaMask)) continue;
+                    if (!encounter.AllowsTarget(hit.position) || !WithinLeash(hit.position) || !body.CanOccupy(hit.position)) continue;
+                    searchGoal = hit.position;
+                    haveSearchGoal = true;
+                    break;
+                }
+            }
+            if (haveSearchGoal && !Travel(searchGoal) && !hasDestination) haveSearchGoal = false;
+            else if (!haveSearchGoal) Hold();
+        }
+
+        internal void HearPlayerGunfire(Vector3 position)
+        {
+            if (health == null || !health.IsAlive || engaged || !encounter.AllowsTarget(position)) return;
+            contactOrigin = transform.position;
+            heardPosition = position;
+            investigateSoundUntil = Time.time + 2.2f;
+        }
 
         private void SetAlertStripe(bool alert)
         {
@@ -199,12 +258,13 @@ namespace ShiftFour
 
             State = Activity.Attack;
             Hold();
-            if (Time.time < nextShot || !encounter.TryClaimShot()) return true;
+            if (Time.time < nextShot || !encounter.CanFire(health) || !encounter.TryClaimShot()) return true;
             nextShot = Time.time + ShotInterval;
             float damage = source.ShotDamage * .55f;
             float before = playerHealth.Current;
             if (float.IsFinite(damage) && damage > 0f)
             {
+                encounter.RecordFire(health);
                 playerHealth.ApplyDamage(damage, source, "Drone shot: Outdoor Scout");
                 effects.Fire(muzzle, hit.point, .11f, .13f);
                 SoundEvents.ReportNoise(muzzle, NoiseCategory.Gunshot, 1f, source);
@@ -231,11 +291,6 @@ namespace ShiftFour
                         agent.angularSpeed * Time.deltaTime);
             }
             weapon?.AimAt(aimPoint);
-            if (marker != null && player != null && player.ViewCamera != null)
-            {
-                Vector3 facing = marker.position - player.ViewCamera.transform.position;
-                if (facing.sqrMagnitude > .001f) marker.rotation = Quaternion.LookRotation(facing);
-            }
         }
 
         private Vector3 HeadingToPlayer()
@@ -276,30 +331,33 @@ namespace ShiftFour
             return playerHit.collider != null && playerHit.collider.GetComponentInParent<PlayerController>() == player;
         }
 
-        private void Travel(Vector3 target)
+        private bool Travel(Vector3 target)
         {
             if (hasDestination && (target - destination).sqrMagnitude < .36f &&
-                (agent.hasPath || Vector3.Distance(transform.position, target) < agent.stoppingDistance + .3f)) return;
-            if (Time.time < nextRouteAttempt) return;
-            nextRouteAttempt = Time.time + .35f;
+                (agent.hasPath || Vector3.Distance(transform.position, target) < agent.stoppingDistance + .3f)) return true;
+            if (Time.time < nextRouteAttempt) return true;
+            nextRouteAttempt = Time.time + (source.IsAggressive ? .25f : .35f);
             if (!NavMesh.SamplePosition(target, out NavMeshHit hit, 1.25f, agent.areaMask) ||
                 !agent.CalculatePath(hit.position, route) || route.status != NavMeshPathStatus.PathComplete || !RouteAllowed())
             {
                 Hold();
                 if (!engaged) WarnNavigation($"cannot reach patrol post {PatrolPost} at {target}");
-                return;
+                return false;
             }
             destination = target;
             hasDestination = agent.SetPath(route);
             agent.isStopped = !hasDestination;
             if (hasDestination) warnedAboutNavigation = false;
             else if (!engaged) WarnNavigation($"could not follow the path to patrol post {PatrolPost}");
+            return hasDestination;
         }
 
         private bool RouteAllowed()
         {
             foreach (Vector3 point in route.corners)
-                if (!encounter.InsidePerimeter(point) || (engaged && !WithinLeash(point))) return false;
+                if (!encounter.InsidePerimeter(point) ||
+                    ((engaged || State == Activity.Investigate) &&
+                        (!WithinLeash(point) || !encounter.AllowsTarget(point)))) return false;
             return true;
         }
 

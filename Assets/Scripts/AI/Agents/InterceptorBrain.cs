@@ -67,14 +67,16 @@ namespace ShiftFour
             distance = float.PositiveInfinity;
             if (!isActiveAndEnabled || !Alive || responseAgent == null || !responseAgent.isOnNavMesh) return false;
             responseRoutes ??= new ControlTacticalRouteValidator(this, NavigationGraph, .04f);
-            return response.TryPlanDispatch(transform.position, report, responseRoutes, DifficultySettings.chaseSpeed,
+            return response.TryPlanDispatch(transform.position, report, responseRoutes, MovementSettings.chaseSpeed,
                 out destination, out distance);
         }
 
         internal void DispatchResponse(Vector3 report, Vector3 destination, float distance)
         {
+            prediction.predictionHorizon = response.LeadHorizon;
             policy = new InterceptorPolicy(prediction);
-            response.Dispatch(report, destination, distance, DifficultySettings.chaseSpeed);
+            ReactToThreat();
+            response.Dispatch(report, destination, distance, MovementSettings.chaseSpeed, ReactionSeconds(.8f));
         }
 
         protected override DecisionOption Decide(bool visible, Vector3 playerPosition, float distance)
@@ -83,9 +85,10 @@ namespace ShiftFour
             if (response != null)
             {
                 var order = response.Decide(this, policy, responseRoutes, visible, playerPosition, ObservedVelocity,
-                    DifficultySettings.chaseSpeed, Motor.ActualVelocity, responseAgent.acceleration);
+                    MovementSettings.chaseSpeed, Motor.ActualVelocity, responseAgent.acceleration);
                 Motor.SetMovementMode(response.State is OutdoorInterceptorResponse.Phase.Alerted or
-                    OutdoorInterceptorResponse.Phase.Intercept or OutdoorInterceptorResponse.Phase.Attack
+                    OutdoorInterceptorResponse.Phase.Intercept or OutdoorInterceptorResponse.Phase.Attack or
+                    OutdoorInterceptorResponse.Phase.Reposition
                     ? DroneMovementMode.Chase : response.State == OutdoorInterceptorResponse.Phase.Search
                         ? DroneMovementMode.Investigate : DroneMovementMode.Patrol);
                 SensorDecision = order.Name;
@@ -158,7 +161,7 @@ namespace ShiftFour
 
         private void LateUpdate()
         {
-            if (!Alive || Player == null || response?.State != OutdoorInterceptorResponse.Phase.Attack) return;
+            if (HasPrototypeTempo || !Alive || Player == null || response?.State != OutdoorInterceptorResponse.Phase.Attack) return;
             Vector3 heading = Vector3.ProjectOnPlane(Player.transform.position - transform.position, Vector3.up);
             if (heading.sqrMagnitude > .01f)
                 transform.rotation = Quaternion.RotateTowards(transform.rotation, Quaternion.LookRotation(heading),

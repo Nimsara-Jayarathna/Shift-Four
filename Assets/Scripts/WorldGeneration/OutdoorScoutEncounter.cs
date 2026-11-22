@@ -18,19 +18,23 @@ namespace ShiftFour
         private BoxCollider[] foundations;
         private float boundary;
         private float alertUntil, nextShot;
+        private int attackLimit;
+        private const float AttackLeaseSeconds = 1.35f;
+        private readonly List<(Health Drone, float Expires)> firing = new List<(Health, float)>(3);
         private OutdoorScout notifyingScout;
         internal event Action<OutdoorScout, Vector3> AlertRaised;
         internal bool HasAlert => isActiveAndEnabled && notifyingScout != null &&
             notifyingScout.State != OutdoorScout.Activity.Destroyed && Time.unscaledTime < alertUntil;
 
         internal static OutdoorScoutEncounter Build(Transform world, GameObject prefab, Vector3 spawn,
-            float boundary, int seed, params GameObject[] otherDrones)
+            float boundary, int seed, int attackLimit, params GameObject[] otherDrones)
         {
             var encounter = PrototypeGeometry.Group("OutdoorScoutPatrols", world).gameObject.AddComponent<OutdoorScoutEncounter>();
             encounter.world = world;
             encounter.spawnPosition = spawn;
             encounter.cache = world.Find(OutdoorSupplyCache.HierarchyName);
             encounter.boundary = boundary;
+            encounter.attackLimit = attackLimit;
             try
             {
                 var foundations = new List<BoxCollider>();
@@ -83,6 +87,33 @@ namespace ShiftFour
             if (Time.time < nextShot) return false;
             nextShot = Time.time + .75f;
             return true;
+        }
+
+        internal bool CanFire(Health drone)
+        {
+            float now = Time.time;
+            for (int i = firing.Count - 1; i >= 0; i--)
+            {
+                var lease = firing[i];
+                if (lease.Expires <= now || lease.Drone == null ||
+                    !lease.Drone.IsAlive || !lease.Drone.gameObject.activeInHierarchy) firing.RemoveAt(i);
+            }
+            return firing.Count < attackLimit || FiringSlot(drone) >= 0;
+        }
+
+        internal void RecordFire(Health drone)
+        {
+            int index = FiringSlot(drone);
+            var lease = (drone, Time.time + AttackLeaseSeconds);
+            if (index < 0) firing.Add(lease);
+            else firing[index] = lease;
+        }
+
+        private int FiringSlot(Health drone)
+        {
+            for (int i = 0; i < firing.Count; i++)
+                if (firing[i].Drone == drone) return i;
+            return -1;
         }
 
         private void BakeNavigation(GameObject scout, GameObject[] others)
@@ -145,7 +176,7 @@ namespace ShiftFour
         }
 
         internal OutdoorScout Deploy(GameObject prefab, PlayerController player, int seed, float height, float range,
-            float fieldOfView, float pursuitDistance, float searchDuration, PrototypeMaterials materials, Font font)
+            float fieldOfView, float pursuitDistance, float searchDuration, PrototypeMaterials materials, int count)
         {
             if (!HasNavigation(prefab) || prefab.GetComponent<ScoutBrain>() == null ||
                 prefab.GetComponentInChildren<DroneRotorVisuals>() == null || player == null || player.ViewCamera == null ||
@@ -161,7 +192,7 @@ namespace ShiftFour
             var routes = new OutdoorScoutRoutes(world, boundary, seed, body.EnvelopeCenter + Vector3.up * heightOffset,
                 body.EnvelopeExtents, new NavMeshQueryFilter { agentTypeID = agent.agentTypeID, areaMask = agent.areaMask });
             OutdoorScout extractionScout = null;
-            for (int index = 0; index < OutdoorScoutRoutes.Names.Length; index++)
+            for (int index = 0; index < count; index++)
             {
                 Vector3[] patrol = routes.Find(index);
                 if (patrol == null)
@@ -183,12 +214,12 @@ namespace ShiftFour
                 scout.GetComponent<DroneBody>().SetFlightOffset(heightOffset);
                 var presentation = scout.GetComponentInChildren<DroneRotorVisuals>(true);
                 presentation.transform.position += Vector3.up * heightOffset;
-                Transform marker = CreateMarker(scout.transform, materials, font, player.ViewCamera, $"SCOUT {index + 1:00}");
-                marker.localPosition += Vector3.up * heightOffset;
-                var stripe = marker.Find("Marker stripe").GetComponent<Renderer>();
+                var marker = PrototypeGeometry.Box("Alert Sensor", scout.transform,
+                    new Vector3(0f, body.EnvelopeCenter.y + heightOffset + .35f, .34f),
+                    new Vector3(.24f, .15f, .22f), materials.Checkpoint, false);
                 var adapter = scout.AddComponent<OutdoorScout>();
                 adapter.Configure(original, player, patrol, this, range, fieldOfView, pursuitDistance, searchDuration,
-                    marker, stripe);
+                    marker.transform, marker.GetComponent<Renderer>());
                 var scoutAgent = scout.GetComponent<NavMeshAgent>();
                 scoutAgent.avoidancePriority = 36 + index * 4;
                 scoutAgent.autoRepath = false;
@@ -215,18 +246,6 @@ namespace ShiftFour
         {
             Vector3 delta = first - second;
             return delta.x * delta.x + delta.z * delta.z;
-        }
-
-        internal static Transform CreateMarker(Transform scout, PrototypeMaterials materials, Font font, Camera camera,
-            string label = "SCOUT DRONE", Material accent = null)
-        {
-            var marker = PrototypeGeometry.Group(label + " marker", scout, Vector3.up * 2.75f);
-            marker.rotation = Quaternion.LookRotation(marker.position - camera.transform.position);
-            PrototypeGeometry.Box("Marker backplate", marker, Vector3.zero, new Vector3(3.95f, .7f, .08f), materials.Metal, false);
-            PrototypeGeometry.Box("Marker stripe", marker, new Vector3(-1.88f, 0, -.053f),
-                new Vector3(.1f, .57f, .025f), accent != null ? accent : materials.Checkpoint, false);
-            PrototypeGeometry.Label(label, marker, new Vector3(.04f, 0, -.053f), .16f, font, 3.55f, .46f, materials.Lettering);
-            return marker;
         }
 
         private static void Exclude(List<NavMeshBuildSource> sources, Bounds footprint, float height)

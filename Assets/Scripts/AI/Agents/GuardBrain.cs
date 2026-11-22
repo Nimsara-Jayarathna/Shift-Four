@@ -6,6 +6,8 @@ namespace ShiftFour
     // Member 3: defend authored Server cover and investigate local, uncertain disturbances.
     public sealed class GuardBrain : DroneBrain
     {
+        public enum IndoorActivity { Patrol, Investigate, Defend, Attack, Return }
+
         protected override bool OwnsSoundInvestigation => true;
         [SerializeField] private Vector3[] coverPoints;
         [SerializeField, Tooltip("Root destination bounds around Home; default stays inside MainLab Server walls/gates.")]
@@ -36,6 +38,10 @@ namespace ShiftFour
         private float aimReadyAt;
         private bool aiming;
         private Vector3 indoorGoal, indoorThreat;
+        private Vector3 securityPost;
+        private Vector3 returnPost;
+        private float fieldOfViewCosine;
+        [field: SerializeField] public IndoorActivity IndoorState { get; private set; }
         private static readonly float[] ApproachAngles = { 0f, 36f, -36f, 72f, -72f };
         private static readonly float[] ApproachDistances = { 4.8f, 8f };
 
@@ -44,6 +50,7 @@ namespace ShiftFour
         protected override float AttackRange => indoorZone?.Attack ?? base.AttackRange;
         protected override float ShotInterval => indoorZone?.Cooldown ?? base.ShotInterval;
         protected override bool CanTarget(Vector3 position) => indoorZone == null || indoorZone.CanTrack(position);
+        internal override bool CanReactToGunfire(Vector3 position) => indoorZone != null && indoorZone.CanTrack(position);
         protected override bool TryAuthorizeShot() => indoorZone == null ||
             (Time.time >= aimReadyAt && indoorZone.TryClaimShot(indoorSlot));
 
@@ -68,12 +75,21 @@ namespace ShiftFour
         public void SetCover(Vector3 first, Vector3 second)
         { coverPoints = new[] { first, second }; haveCover = false; }
 
-        internal void ConfigureZone(IndoorGuardZone zone, int slot)
+        internal void ConfigureZone(IndoorGuardZone zone, int slot, float fieldOfView)
         {
             indoorZone = zone;
             indoorSlot = slot;
+            securityPost = zone.SecurityPost(slot);
+            fieldOfViewCosine = Mathf.Cos(fieldOfView * .5f * Mathf.Deg2Rad);
             var template = GetComponent<NavMeshAgent>();
             indoorFilter = new NavMeshQueryFilter { agentTypeID = template.agentTypeID, areaMask = template.areaMask };
+        }
+
+        protected override bool InDetectionArc(Vector3 direction)
+        {
+            if (indoorZone == null) return true;
+            Vector3 level = Vector3.ProjectOnPlane(direction, Vector3.up);
+            return level.sqrMagnitude < .01f || Vector3.Dot(transform.forward, level.normalized) >= fieldOfViewCosine;
         }
 
         protected override bool ShouldResumePatrol(Vector3 targetPosition)
@@ -84,7 +100,30 @@ namespace ShiftFour
                 return false;
             indoorZone.ReleaseApproach(indoorSlot);
             nextApproach = 0f;
+            if (IndoorState != IndoorActivity.Patrol && IndoorState != IndoorActivity.Return)
+                BeginIndoorReturn();
+            if (IndoorState == IndoorActivity.Return && Vector3.Distance(transform.position, returnPost) > 1.45f)
+            {
+                return false;
+            }
+            IndoorState = IndoorActivity.Patrol;
             return true;
+        }
+
+        private void BeginIndoorReturn()
+        {
+            IndoorState = IndoorActivity.Return;
+            Vector3[] patrol = indoorZone.Patrol(indoorSlot);
+            returnPost = Home;
+            float nearest = float.PositiveInfinity;
+            for (int i = 0; i < patrol.Length; i++)
+            {
+                float distance = (transform.position - patrol[i]).sqrMagnitude;
+                if (distance >= nearest || !Reachable(patrol[i])) continue;
+                nearest = distance;
+                returnPost = patrol[i];
+                ResumePatrolAt(i);
+            }
         }
 
         protected override DecisionOption Decide(bool visible, Vector3 playerPosition, float distance)
@@ -147,30 +186,40 @@ namespace ShiftFour
             if (visible)
             {
                 indoorZone.ShareSighting(threat);
-                if (!aiming) aimReadyAt = Time.time + .45f;
+                if (!aiming) aimReadyAt = Time.time + ReactionSeconds(.45f);
                 aiming = true;
             }
             else if (!(indoorZone.CanTrack(playerPosition) && TryGetIndoorThreat(out threat)) &&
                 !indoorZone.TryGetScoutAlert(out threat))
             {
                 decisionMode = DroneMovementMode.Patrol;
-                return Option("Return to assigned patrol", Home, 10f);
+                if (IndoorState != IndoorActivity.Return) BeginIndoorReturn();
+                return Option("Return to protected post", returnPost, 10f);
             }
 
             decisionMode = visible ? DroneMovementMode.Chase : DroneMovementMode.Investigate;
-            if (visible && distance >= 3.5f && distance <= AttackRange - 1f)
+            if (!visible && indoorZone.TryGetScoutAlert(out _)) ReactToThreat();
+            float attackMargin = IndoorState == IndoorActivity.Attack ? .2f : 1f;
+            bool defendingObjective = Vector3.Distance(transform.position, securityPost) < 7f;
+            if (visible && distance >= 3.1f && distance <= AttackRange - attackMargin &&
+                (defendingObjective || distance < 5f || IndoorState == IndoorActivity.Attack))
             {
+                IndoorState = IndoorActivity.Attack;
                 nextApproach = 0f;
                 indoorZone.ReleaseApproach(indoorSlot);
                 return Option("Hold and engage visible player", transform.position, 75f);
             }
 
-            if (Time.time >= nextApproach || (indoorThreat - threat).sqrMagnitude > 2.5f * 2.5f)
+            IndoorState = visible ? IndoorActivity.Defend : IndoorActivity.Investigate;
+            if (Time.time >= nextApproach && ((indoorThreat - threat).sqrMagnitude > 1.3f * 1.3f ||
+                indoorGoal == transform.position || !Motor.HasRoute || body.MotionBlocked))
             {
-                nextApproach = Time.time + .4f;
+                nextApproach = Time.time + (IsAggressive ? .26f : .42f);
                 indoorThreat = threat;
-                indoorGoal = FindIndoorApproach(threat);
+                indoorGoal = FindIndoorApproach(threat, visible);
             }
+            if (indoorGoal != transform.position && !indoorZone.TryClaimApproach(indoorSlot, indoorGoal))
+                indoorGoal = transform.position;
             return Option(visible ? "Pursue within security zone" : "Investigate disturbance in security zone",
                 indoorGoal, 65f);
         }
@@ -189,22 +238,38 @@ namespace ShiftFour
             return false;
         }
 
-        private Vector3 FindIndoorApproach(Vector3 threat)
+        private Vector3 FindIndoorApproach(Vector3 threat, bool visible)
         {
-            Vector3 direction = Vector3.ProjectOnPlane(Home - threat, Vector3.up);
+            Vector3 direction = Vector3.ProjectOnPlane(securityPost - threat, Vector3.up);
             if (direction.sqrMagnitude < .01f) direction = -transform.forward;
+            Vector3 best = transform.position;
+            float bestScore = float.NegativeInfinity;
             foreach (float radius in ApproachDistances)
             foreach (float angle in ApproachAngles)
             {
                 Vector3 point = threat + Quaternion.Euler(0f, angle, 0f) * direction.normalized * radius;
                 point.y = Home.y;
                 if (!NavMesh.SamplePosition(point, out NavMeshHit hit, .65f, indoorFilter) ||
-                    !body.CanOccupy(hit.position) || !Reachable(hit.position) ||
+                    !indoorZone.CanTrack(hit.position) || !body.CanOccupy(hit.position)) continue;
+                bool clearLane = !ProtectsFrom(hit.position, threat);
+                float screen = Mathf.Max(0f, Vector3.Dot(
+                    Vector3.ProjectOnPlane(hit.position - securityPost, Vector3.up).normalized, -direction.normalized));
+                float score = (clearLane == visible ? 12f : 0f) -
+                    Vector3.Distance(hit.position, securityPost) * 1.35f -
+                    Vector3.Distance(hit.position, transform.position) * .45f -
+                    Mathf.Abs(Vector3.Distance(hit.position, threat) - 5f) + screen * 3f;
+                if (score <= bestScore || !Reachable(hit.position) ||
                     !indoorZone.TryClaimApproach(indoorSlot, hit.position)) continue;
-                return hit.position;
+                best = hit.position;
+                bestScore = score;
             }
-            indoorZone.ReleaseApproach(indoorSlot);
-            return transform.position;
+            if (float.IsNegativeInfinity(bestScore))
+            {
+                if (body.CanOccupy(securityPost) && Reachable(securityPost) &&
+                    indoorZone.TryClaimApproach(indoorSlot, securityPost)) return securityPost;
+                indoorZone.ReleaseApproach(indoorSlot);
+            }
+            return best;
         }
 
         // Guard destinations already include spacing and defensive route validation. The shared
@@ -212,6 +277,7 @@ namespace ShiftFour
         protected override void MoveToDecision(DecisionOption choice, bool visible)
         {
             Motor.SetMovementMode(decisionMode);
+            if (visible && indoorZone != null) Motor.AimAt(Player.EyePosition);
             Motor.GoTo(choice.Destination);
         }
 

@@ -15,6 +15,9 @@ namespace ShiftFour
         private readonly NavMeshQueryFilter filter;
         private readonly NavMeshPath connection = new NavMeshPath();
         private Vector3 post, goal, targetAtPlan, movementAtPlan, lastPosition, lastBurstPosition, failedGoal;
+        private Vector3 lastSeenPosition, lastSeenHeading;
+        private Vector3 previousBurstPosition;
+        private bool havePreviousBurst;
         private bool haveGoal, haveBurst, haveFailedGoal;
         private int shots, bursts;
         private float planAt, progressAt, lastSeenAt, warnUntil, recoverUntil, attackUntil, failedUntil, lastPlanSuccess;
@@ -76,7 +79,7 @@ namespace ShiftFour
         }
 
         internal DecisionOption Decide(FlankerBrain brain, FlankerRoutes routes, bool visible,
-            Vector3 target, Vector3 movement)
+            Vector3 target, Vector3 movement, Vector3 facing)
         {
             float now = Time.time;
             Vector3 position = brain.transform.position;
@@ -91,11 +94,17 @@ namespace ShiftFour
                 State = Phase.Flanking;
                 bursts = 0;
                 shots = 0;
-                haveGoal = haveBurst = haveFailedGoal = false;
+                haveGoal = haveBurst = havePreviousBurst = haveFailedGoal = false;
                 planAt = 0f;
                 lastPlanSuccess = now;
             }
-            if (visible) lastSeenAt = now;
+            if (visible)
+            {
+                lastSeenAt = now;
+                lastSeenPosition = target;
+                lastSeenHeading = movement.sqrMagnitude < .36f ? Flat(facing).normalized :
+                    Vector3.Lerp(movement.normalized, Flat(facing).normalized, .25f).normalized;
+            }
             if (!CanObserve(brain, target) || now - lastSeenAt > 3.2f)
             {
                 return Disengage(brain);
@@ -117,7 +126,15 @@ namespace ShiftFour
                 return Option(State == Phase.Warning ? "Flanker threat warning" : "Fire ambush burst", position);
             }
 
-            if (!visible) return Option("Hold cover while checking last sighting", position);
+            if (!visible)
+            {
+                if (!haveGoal && now >= planAt)
+                {
+                    planAt = now + .72f;
+                    haveGoal = TryFindGoal(routes, position, lastSeenPosition, lastSeenPosition, lastSeenHeading, now, out goal);
+                }
+                return Option("Investigate last sighting from flank", haveGoal ? goal : position);
+            }
             if (haveGoal && DistanceSquared(position, lastPosition) >= .3f * .3f)
             {
                 lastPosition = position;
@@ -131,14 +148,17 @@ namespace ShiftFour
                 haveGoal = false;
             }
 
-            if (now >= planAt && (!haveGoal || DistanceSquared(targetAtPlan, target) > 2.25f * 2.25f))
+            if (now >= planAt && (!haveGoal || DistanceSquared(targetAtPlan, target) > 2.25f * 2.25f ||
+                Vector3.Dot(movementAtPlan, lastSeenHeading) < .55f))
             {
-                planAt = now + .55f;
-                haveGoal = TryFindGoal(routes, position, target, movement, now, out goal);
+                planAt = now + Settings.ReplanInterval * (brain.IsAggressive ? 1f : 1.3f);
+                Vector3 lead = target + Vector3.ClampMagnitude(Flat(movement) * Settings.LeadSeconds, 3f);
+                haveGoal = TryFindGoal(routes, position, target, lead, lastSeenHeading, now, out goal) ||
+                    (lead != target && TryFindGoal(routes, position, target, target, lastSeenHeading, now, out goal));
                 targetAtPlan = target;
                 if (haveGoal)
                 {
-                    movementAtPlan = movement;
+                    movementAtPlan = lastSeenHeading;
                     lastPosition = position;
                     progressAt = lastPlanSuccess = now;
                 }
@@ -148,17 +168,17 @@ namespace ShiftFour
 
             if (DistanceSquared(position, goal) <= 1.45f * 1.45f && now >= recoverUntil &&
                 DistanceSquared(position, target) <= (AttackRange - .4f) * (AttackRange - .4f) &&
-                Vector3.Dot(Flat(position - target).normalized, movementAtPlan) <= .35f)
+                Vector3.Dot(Flat(position - target).normalized, lastSeenHeading) <= .35f)
             {
                 State = Phase.Warning;
                 shots = 0;
-                warnUntil = now + (slot == 2 ? .75f : .9f);
+                warnUntil = now + Mathf.Max(.55f, brain.ReactionSeconds(slot == 2 ? .75f : .9f));
                 return Option("Flanker threat warning", position);
             }
             return Option(State == Phase.Reposition ? "Reposition to a new flank" : "Approach player flank", goal);
         }
 
-        private bool TryFindGoal(FlankerRoutes routes, Vector3 position, Vector3 target, Vector3 heading,
+        private bool TryFindGoal(FlankerRoutes routes, Vector3 position, Vector3 target, Vector3 anchor, Vector3 heading,
             float now, out Vector3 best)
         {
             routes.Begin(post);
@@ -170,16 +190,21 @@ namespace ShiftFour
             for (int i = 0; i < angles.Length * 2; i++)
             {
                 float distance = i < angles.Length ? radius : radius * .78f;
-                Vector3 candidate = target + Quaternion.Euler(0f, angles[i % angles.Length] * sign, 0f) * heading * distance;
+                Vector3 candidate = anchor + Quaternion.Euler(0f, angles[i % angles.Length] * sign, 0f) * heading * distance;
                 candidate.y = post.y;
                 if (!NavMesh.SamplePosition(candidate, out NavMeshHit hit, 1.15f, filter) ||
                     (haveFailedGoal && now < failedUntil && DistanceSquared(hit.position, failedGoal) < 2.3f * 2.3f) ||
                     (haveBurst && DistanceSquared(hit.position, lastBurstPosition) < 3.4f * 3.4f) ||
+                    (havePreviousBurst && DistanceSquared(hit.position, previousBurstPosition) < 2.4f * 2.4f) ||
                     !CanTravel(hit.position) || !routes.ClearFiringLine(hit.position, target)) continue;
 
+                float facingDot = Vector3.Dot(Flat(hit.position - target).normalized, heading);
+                if (facingDot > .24f) continue;
                 Vector3[] path = routes.NativeRoute(position, hit.position);
                 if (!FlankerPolicy.Valid(path)) continue;
-                float rating = FlankerPolicy.Length(path) + i * 2.5f;
+                float rating = FlankerPolicy.Length(path) + i * 1.7f +
+                    Mathf.Abs(Vector3.Distance(hit.position, target) - radius) * .6f +
+                    (slot == 1 ? Mathf.Abs(facingDot) : facingDot + 1f) * 4f;
                 if (rating >= cost) continue;
                 cost = rating;
                 best = hit.position;
@@ -198,6 +223,8 @@ namespace ShiftFour
         private void BeginReposition(Vector3 position, float now)
         {
             State = Phase.Reposition;
+            previousBurstPosition = lastBurstPosition;
+            havePreviousBurst = haveBurst;
             lastBurstPosition = position;
             haveBurst = true;
             haveGoal = false;

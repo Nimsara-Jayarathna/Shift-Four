@@ -48,6 +48,7 @@ namespace ShiftFour
         private float progressRemaining;
         private float progressAt;
         private bool turning;
+        private Vector3? facingTarget;
         private Transform cachedVisual;
         private Vector3 visualRestPosition;
         private DroneRotorVisuals visualOwner;
@@ -189,6 +190,13 @@ namespace ShiftFour
 
         // No collision-safe standoff exists. Hold without terminal Stop(), then reconsider on
         // the next policy tick. Falling back to the player root defeats the standoff contract.
+        internal void AimAt(Vector3? target) => facingTarget = target;
+
+        internal void HoldAtFiringPost()
+        {
+            if (state != MovementState.NoGoal || hasGoal) HoldCombatPosition();
+        }
+
         private void HoldCombatPosition()
         {
             if (state == MovementState.Stopped) return;
@@ -225,7 +233,10 @@ namespace ShiftFour
             velocity.y = 0f;
             if (velocity.sqrMagnitude < 0.15f * 0.15f) turning = false;
             else if (velocity.sqrMagnitude > 0.3f * 0.3f) turning = true;
-            if (turning)
+            if (facingTarget.HasValue)
+                transform.rotation = TurnTowards(transform.rotation, facingTarget.Value - transform.position,
+                    turnSpeed * 1.4f, agent.angularSpeed, Time.deltaTime);
+            else if (turning)
                 transform.rotation = TurnTowards(transform.rotation, velocity, turnSpeed, agent.angularSpeed, Time.deltaTime);
             CacheVisualPosition();
             if (visual != null && visualOwner == null)

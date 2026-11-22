@@ -9,12 +9,8 @@ namespace ShiftFour
     // Supplies an outdoor post, waypoints and player to an original prefab brain.
     internal sealed class OutdoorDroneEncounter : MonoBehaviour
     {
-        private Transform marker;
-        private Camera playerView;
-        private Health health;
-
         internal static T Spawn<T>(Transform world, GameObject prefab, PlayerController player, string building,
-            int buildingIndex, string role, Material accent, PrototypeMaterials materials, Font font, int seed,
+            int buildingIndex, string role, int seed,
             Transform parent = null, string post = null, IndoorGuardZone zone = null, int slot = 0,
             OutdoorFlankerAmbush ambush = null, OutdoorInterceptorResponse interceptor = null)
             where T : DroneBrain
@@ -35,8 +31,8 @@ namespace ShiftFour
                 if (player == null || player.ViewCamera == null || player.GetComponent<Health>() == null)
                     throw new InvalidOperationException("Spawn needs an outdoor player with a camera and Health.");
 
-                T brain = encounter.Build<T>(area, prefab, player, agent, body, buildingIndex, role, accent,
-                    materials, font, zone, slot, ambush, interceptor);
+                T brain = encounter.Build<T>(area, prefab, player, agent, body, buildingIndex, role,
+                    zone, slot, ambush, interceptor);
                 Debug.Log($"Open World: {role} spawned by {building}, {encounter.name}, on seed {seed} using {typeof(T).Name}.", encounter);
                 return brain;
             }
@@ -50,7 +46,7 @@ namespace ShiftFour
         }
 
         private T Build<T>(Transform area, GameObject prefab, PlayerController player, NavMeshAgent templateAgent,
-            DroneBody body, int buildingIndex, string role, Material accent, PrototypeMaterials materials, Font font,
+            DroneBody body, int buildingIndex, string role,
             IndoorGuardZone zone, int slot, OutdoorFlankerAmbush ambush, OutdoorInterceptorResponse interceptor)
             where T : DroneBrain
         {
@@ -76,7 +72,7 @@ namespace ShiftFour
             brain.ConfigureOutdoor(player, graph, patrol);
             if (zone != null && brain is GuardBrain guard)
             {
-                guard.ConfigureZone(zone, slot);
+                guard.ConfigureZone(zone, slot, zone.FieldOfView);
                 var navigation = instance.GetComponent<NavMeshAgent>();
                 navigation.avoidancePriority = 46 + slot * 3;
                 navigation.autoRepath = false;
@@ -91,10 +87,6 @@ namespace ShiftFour
                 responder.ConfigureResponse(interceptor);
                 instance.GetComponent<NavMeshAgent>().autoRepath = false;
             }
-            playerView = player.ViewCamera;
-            health = instance.GetComponent<Health>();
-            marker = OutdoorScoutEncounter.CreateMarker(instance.transform, materials, font, playerView,
-                role.ToUpperInvariant() + " DRONE", accent);
             staging.gameObject.SetActive(true);
             if (!instance.GetComponent<NavMeshAgent>().isOnNavMesh)
                 throw new InvalidOperationException("The prefab could not bind to the baked NavMesh.");
@@ -170,12 +162,5 @@ namespace ShiftFour
         private static bool Connected(Vector3 from, Vector3 to, NavMeshQueryFilter filter, NavMeshPath route)
             => NavMesh.CalculatePath(from, to, filter, route) && route.status == NavMeshPathStatus.PathComplete;
 
-        private void LateUpdate()
-        {
-            if (marker == null || playerView == null || health == null) return;
-            if (!health.IsAlive) { marker.gameObject.SetActive(false); enabled = false; return; }
-            Vector3 facing = marker.position - playerView.transform.position;
-            if (facing.sqrMagnitude > .001f) marker.rotation = Quaternion.LookRotation(facing);
-        }
     }
 }

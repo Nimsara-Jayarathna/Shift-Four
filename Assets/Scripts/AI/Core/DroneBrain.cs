@@ -31,6 +31,10 @@ namespace ShiftFour
         [SerializeField, Min(0f)] private float combatOriginHeight = 1.25f;
 
         private Health health;
+        private float prototypeMaximumHealth;
+        private OutdoorScoutEncounter outdoorAttackBudget;
+        private Health playerHealth;
+        private DroneCombatReadiness combatReadiness;
         private DroneMotor motor;
         private PlayerController player;
         private WaypointGraph outdoorGraph;
@@ -62,12 +66,19 @@ namespace ShiftFour
         public Vector3 LastShotHit { get; private set; }
 
         public string AgentName => agentName;
-        public string CurrentDecision { get; private set; } = "Idle";
+        [field: SerializeField] public string CurrentDecision { get; private set; } = "Idle";
         public Vector3 Home => home;
         public DroneDifficultyProfile DifficultyProfile => difficultyProfile;
         public float ShotDamage => (difficultyProfile != null ? DifficultySettings.shotDamage : 10f) /
             GameSession.CombatDurationMultiplier;
         public DroneDifficultySettings DifficultySettings { get; private set; }
+        internal DroneDifficultySettings MovementSettings { get; private set; }
+        internal bool CombatAlertPulse => Alive && combatReadiness != null && combatReadiness.Pulse;
+        internal bool IsAggressive => Alive && combatReadiness != null && combatReadiness.Aggressive;
+        protected bool HasPrototypeTempo => combatReadiness != null;
+        internal float PrototypeDecisionOffset { get; private set; }
+        internal float ReactionSeconds(float previous) => combatReadiness?.Tuning.reactionSeconds ?? previous;
+        internal bool ReadyForPrototypeShot => combatReadiness == null || combatReadiness.ReadyToFire;
         public DroneHearingSensor Hearing { get; private set; }
         public DroneAwareness Awareness { get; private set; }
         protected Vector3 LastKnown => lastKnown;
@@ -91,6 +102,19 @@ namespace ShiftFour
             home = post;
         }
 
+        internal void ConfigurePrototypeCombat(DroneCombatTempo tuning, int slot, float maximumHealth,
+            OutdoorScoutEncounter attackBudget)
+        {
+            combatReadiness = new DroneCombatReadiness(tuning);
+            prototypeMaximumHealth = maximumHealth;
+            outdoorAttackBudget = attackBudget;
+            PrototypeDecisionOffset = slot * .009f;
+            nextDecision = Time.time + PrototypeDecisionOffset;
+        }
+        internal void ReactToThreat() { if (Alive) combatReadiness?.React(); }
+        internal void ConfirmPrototypeSight() { if (Alive) combatReadiness?.ConfirmSight(); }
+        internal virtual bool CanReactToGunfire(Vector3 position) => true;
+
         internal void ConfigureOutdoor(PlayerController target, WaypointGraph graph, Vector3[] patrol)
         {
             player = target;
@@ -106,9 +130,10 @@ namespace ShiftFour
             motor = GetComponent<DroneMotor>();
             if (outdoorPatrol == null)
                 player = GameSession.Instance != null ? GameSession.Instance.Player : null;
+            playerHealth = player != null ? player.GetComponent<Health>() : null;
             weaponMount = GetComponentInChildren<DroneRotorVisuals>()?.WeaponMount;
             if (outdoorPatrol != null && (outdoorGraph == null || outdoorPatrol.Length < 2 ||
-                player == null || player.GetComponent<Health>() == null || weaponMount == null))
+                playerHealth == null || weaponMount == null))
             {
                 Debug.LogWarning($"Open World: {agentName} could not initialize. Check patrol, graph, player Health and weapon mount.", this);
                 enabled = false;
@@ -117,7 +142,7 @@ namespace ShiftFour
             health.Died += OnDied;
             lastKnown = home;
             InitializeDifficulty();
-            if (difficultyProfile != null) motor.InitializeMovement(DifficultySettings);
+            if (difficultyProfile != null) motor.InitializeMovement(MovementSettings);
             var response = awarenessSettings.Validated();
             if (UsesImmediateSoundInvestigation)
             {
@@ -138,7 +163,8 @@ namespace ShiftFour
 
         private void OnHeard(SoundObservation observation)
         {
-            if (rapidSoundResponse) nextDecision = 0f; // Wake next Update, outside the sound dispatcher.
+            if (rapidSoundResponse)
+                nextDecision = HasPrototypeTempo ? Mathf.Min(nextDecision, Time.time + PrototypeDecisionOffset) : 0f;
         }
 
         // Health initialization is one-shot. Movement is bound separately in Start so profile
@@ -154,8 +180,9 @@ namespace ShiftFour
             }
             if (difficultyProfile == null) return false; // Custom/unconfigured brains retain legacy tuning.
             DifficultySettings = difficultyProfile.Settings;
+            MovementSettings = combatReadiness != null ? combatReadiness.Tuning.Apply(DifficultySettings) : DifficultySettings;
             if (health == null) health = GetComponent<Health>();
-            float maximum = DifficultySettings.maximumHealth;
+            float maximum = prototypeMaximumHealth > 0f ? prototypeMaximumHealth : DifficultySettings.maximumHealth;
             if (gameObject.scene.name == "MainLab") maximum *= GameSession.CombatDurationMultiplier;
             return health != null && health.TryInitializeMaximum(maximum);
         }
@@ -165,15 +192,18 @@ namespace ShiftFour
             if (!Alive || player == null) return;
             var session = outdoorPatrol == null ? GameSession.Instance : null;
             if (session != null && !session.CanPlay) return;
-            if (!player.GetComponent<Health>().IsAlive || (session != null && session.Ended))
+            if (playerHealth == null || !playerHealth.IsAlive || (session != null && session.Ended))
             {
                 WeaponAimPoint = null;
                 motor.Stop();
                 return;
             }
             if (Time.time < nextDecision) return;
-            nextDecision = Time.time + DecisionInterval;
             bool visible = CanSeePlayer();
+            if (visible) ConfirmPrototypeSight();
+            nextDecision = Time.time + (combatReadiness == null ? DecisionInterval :
+                (IsAggressive ? .07f : .13f) + PrototypeDecisionOffset * .11f);
+            if (HasPrototypeTempo) motor.AimAt(null);
             WeaponAimPoint = visible ? player.EyePosition : (Vector3?)null;
             weaponMount?.AimAt(WeaponAimPoint);
             Vector3 position = player.transform.position;
@@ -230,11 +260,19 @@ namespace ShiftFour
                 motor.SetMovementMode(DroneMovementMode.Investigate);
             }
             CurrentDecision = choice.Name;
-            MoveToDecision(choice, visible);
+            if (HasPrototypeTempo && visible && (choice.Destination - transform.position).sqrMagnitude < .02f)
+            {
+                motor.HoldAtFiringPost();
+                motor.AimAt(player.EyePosition);
+            }
+            else MoveToDecision(choice, visible);
             if (visible && distance <= AttackRange) TryShoot();
         }
 
         protected virtual bool ShouldResumePatrol(Vector3 targetPosition) => Awareness.State == DroneAwarenessState.Patrol;
+        protected virtual bool InDetectionArc(Vector3 offset) => true;
+
+        protected void ResumePatrolAt(int post) => outdoorPost = post;
 
         protected abstract DecisionOption Decide(bool visible, Vector3 playerPosition, float distance);
 
@@ -261,10 +299,11 @@ namespace ShiftFour
 
         private bool CanSeePlayer()
         {
+            if (HasPrototypeTempo && !player.isActiveAndEnabled) return false;
             if (!CanTarget(player.transform.position)) return false;
             Vector3 origin = CombatOrigin;
             Vector3 vector = player.EyePosition - origin;
-            if (vector.magnitude > VisionDistance) return false;
+            if (vector.sqrMagnitude > VisionDistance * VisionDistance || !InDetectionArc(vector)) return false;
             // Stationed drones watch their entire surroundings rather than waiting to face the player.
             return ClearShot(origin, vector, VisionDistance);
         }
@@ -272,10 +311,12 @@ namespace ShiftFour
         private void TryShoot()
         {
             using var profileSample=FireProfile.Auto();
-            if (!Alive || player == null || !player.GetComponent<Health>().IsAlive ||
+            if (!Alive || playerHealth == null || !playerHealth.IsAlive ||
                 (outdoorPatrol == null && GameSession.Instance != null && GameSession.Instance.Ended) || Time.time < nextShot) return;
+            if (!ReadyForPrototypeShot || (outdoorAttackBudget != null && !outdoorAttackBudget.CanFire(health))) return;
             float range = AttackRange;
-            if (Vector3.Distance(CombatOrigin, player.EyePosition) > range || !CanSeePlayer()) return;
+            if (Vector3.Distance(CombatOrigin, player.EyePosition) > range ||
+                (combatReadiness == null ? !CanSeePlayer() : !player.isActiveAndEnabled || !CanTarget(player.transform.position))) return;
             weaponMount?.AimAt(player.EyePosition);
             // A protruding barrel cannot bypass cover between its mounting point and tip.
             if (weaponMount != null && !ClearShotAtFire(weaponMount.PivotPosition,
@@ -288,12 +329,13 @@ namespace ShiftFour
             nextShot = Time.time + ShotInterval;
             if (clear)
             {
+                outdoorAttackBudget?.RecordFire(health);
                 HasCommittedToAttack = true;
                 if (outdoorPatrol == null) Awareness?.CommitToCombat(Time.time);
                 LastShotOrigin = origin;
                 LastShotHit = hitPoint;
                 WeaponAimPoint = player.EyePosition;
-                player.GetComponent<Health>().ApplyDamage(DamagePerShot, this, "Drone shot: " + agentName);
+                playerHealth.ApplyDamage(DamagePerShot, this, "Drone shot: " + agentName);
                 ShotFired?.Invoke(this);
                 SoundEvents.ReportNoise(origin, NoiseCategory.Gunshot, 1f, this);
             }

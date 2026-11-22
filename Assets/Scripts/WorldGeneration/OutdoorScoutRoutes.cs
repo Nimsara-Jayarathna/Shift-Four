@@ -9,7 +9,8 @@ namespace ShiftFour
     internal sealed class OutdoorScoutRoutes
     {
         internal static readonly string[] Names =
-            { "Main Avenue", "Control Road", "Woodland", "North Boundary", "Checkpoint Approach" };
+            { "Main Avenue", "Control Road", "Woodland", "North Boundary", "Checkpoint Approach",
+                "Server Road", "East Woodland" };
 
         private readonly Transform world;
         private readonly float boundary;
@@ -42,6 +43,24 @@ namespace ShiftFour
                 Vector3[] result = TryLoop(lane, index == 0);
                 if (result != null) return result;
             }
+            return index == 6 ? FindEastPerimeterLoop(zone.center.y) : null;
+        }
+
+        private Vector3[] FindEastPerimeterLoop(float grove)
+        {
+            // Use shorter circuits in the same east-side region when a densely wooded
+            // seed cannot fit a full circuit around its closest grove.
+            for (int band = 0; band < 4; band++)
+            for (int row = 0; row < 15; row++)
+            {
+                int step = (row + 1) / 2 * (row % 2 == 0 ? 1 : -1);
+                float depth = grove + step * 8f;
+                if (Mathf.Abs(depth) > boundary - 12f) continue;
+                float east = boundary - 5f - band * 5.3f;
+                var lane = Rect.MinMaxRect(east - 5f, depth - 5.5f, east, depth + 5.5f);
+                Vector3[] result = TryLoop(lane, false);
+                if (result != null) return result;
+            }
             return null;
         }
 
@@ -71,6 +90,19 @@ namespace ShiftFour
             }
             if (index == 3)
                 return Rect.MinMaxRect(7f, boundary - 10f, boundary * .7f, boundary - 4.9f);
+            if (index == 5)
+            {
+                Transform branch = roads.Find("Server branch");
+                float west = branch.localPosition.x - branch.localScale.x * .5f + 7.5f;
+                float z = branch.localPosition.z;
+                return Rect.MinMaxRect(west, z - 1.65f, -9f, z + 1.65f);
+            }
+            if (index == 6)
+            {
+                float east = boundary - 5.8f;
+                float grove = FindWoodlandCenter(east);
+                return Rect.MinMaxRect(east - 6.3f, grove - 12f, east, grove + 12f);
+            }
 
             Vector3 checkpoint = world.Find("Buildings/Checkpoint").localPosition;
             float front = checkpoint.z - ResearchBuildingBuilder.FrontOffset(0);
@@ -79,17 +111,16 @@ namespace ShiftFour
 
         private float RoadZ(string name) => world.Find("Roads/" + name).localPosition.z;
 
-        private float FindWoodlandCenter(float west)
+        private float FindWoodlandCenter(float edge)
         {
-            // Select an actual stand close to the western boundary. The scenic forest lines
-            // this edge even when tree density disables the individual playable trees.
+            // Select an actual stand near the perimeter when individual trees are present.
             float preferredDepth = -boundary * .28f;
             float grove = preferredDepth;
             float nearest = float.PositiveInfinity;
             foreach (Transform tree in world.Find("Environment/Trees"))
             {
                 Vector3 local = world.InverseTransformPoint(tree.position);
-                float score = Mathf.Abs(local.x - west) + Mathf.Abs(local.z - preferredDepth) * .18f;
+                float score = Mathf.Abs(local.x - edge) + Mathf.Abs(local.z - preferredDepth) * .18f;
                 if (score >= nearest) continue;
                 nearest = score;
                 grove = Mathf.Clamp(local.z, -boundary + 26f, boundary - 25f);
@@ -102,7 +133,7 @@ namespace ShiftFour
             // The default road and entrance lanes already have reserved clearances.
             // Perimeter searches also try adjacent bands when trees or buildings occupy the initial loop.
             int step = (attempt + 1) / 2 * (attempt % 2 == 0 ? 1 : -1);
-            Vector2 shift = role == 2 ? new Vector2(attempt % 3 * 1.7f, step * 2.5f) :
+            Vector2 shift = role is 2 or 6 ? new Vector2((role == 2 ? 1 : -1) * (attempt % 3) * 1.7f, step * 2.5f) :
                 role == 3 ? new Vector2(step * 2.6f, -attempt % 3 * 1.85f) :
                 new Vector2(attempt % 3 == 2 ? .85f : 0f, step * .8f);
             Vector2 center = lane.center + shift + new Vector2(0f, jitter * .52f);

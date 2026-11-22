@@ -9,18 +9,21 @@ namespace ShiftFour
     [DisallowMultipleComponent]
     internal sealed class OutdoorInterceptorDispatch : MonoBehaviour
     {
-        private readonly List<InterceptorBrain> stations = new List<InterceptorBrain>(2);
+        private readonly List<InterceptorBrain> stations = new List<InterceptorBrain>(3);
+        private readonly List<InterceptorBrain> responders = new List<InterceptorBrain>(3);
         private OutdoorScoutEncounter alerts;
         private float nextOrderAt, cooldown;
-        private InterceptorBrain responder;
+        private int responseLimit;
         private float warningUntil;
+        private Vector3 lastReport;
+        private float suppressReportUntil;
 
-        internal bool HasWarning => isActiveAndEnabled && responder != null && responder.IsResponding &&
+        internal bool HasWarning => isActiveAndEnabled && responders.Count > 0 &&
             Time.unscaledTime < warningUntil;
 
         internal static OutdoorInterceptorDispatch Deploy(Transform world, OutdoorScoutEncounter alerts, GameObject prefab,
-            PlayerController player, float boundary, float cooldown, float pursuitTime, float pursuitDistance,
-            PrototypeMaterials materials, Font font, int seed)
+            PlayerController player, float boundary, float cooldown, float pursuitTime, float pursuitDistance, float leadHorizon,
+            int count, int responseLimit, int seed)
         {
             var hub = Group("OutdoorInterceptors", world).gameObject.AddComponent<OutdoorInterceptorDispatch>();
             var agent = prefab != null ? prefab.GetComponent<NavMeshAgent>() : null;
@@ -32,27 +35,38 @@ namespace ShiftFour
             }
 
             hub.cooldown = cooldown;
+            hub.responseLimit = responseLimit;
             var filter = new NavMeshQueryFilter { agentTypeID = agent.agentTypeID, areaMask = agent.areaMask };
             Transform roads = world.Find("Roads");
             var roadPosts = RoadPosts(world, roads, alerts, filter);
             float south = roads.Find("Checkpoint branch").localPosition.z;
             float north = roads.Find("Control branch").localPosition.z;
-            for (int slot = 0; slot < 2; slot++)
+            for (int slot = 0; slot < count; slot++)
             {
-                Vector3 anchor = slot == 0 ? new Vector3(10f, 0f, Mathf.Lerp(south, north, .55f)) :
-                    new Vector3(boundary - 8.5f, 0f, boundary * .46f);
+                Vector3 anchor = slot switch
+                {
+                    0 => new Vector3(10f, 0f, Mathf.Lerp(south, north, .55f)),
+                    1 => new Vector3(boundary - 8.5f, 0f, boundary * .46f),
+                    _ => new Vector3(-boundary + 9f, 0f, boundary * .5f)
+                };
                 if (!FindStation(world, anchor, slot, boundary, alerts, filter, body, out Vector3 point))
                 {
                     Debug.LogWarning($"Open World: no clear Interceptor station {slot + 1} on seed {seed}.", hub);
                     continue;
                 }
 
-                Transform station = Group(slot == 0 ? "01 Central Station" : "02 Perimeter Station", hub.transform);
+                Transform station = Group(slot switch
+                {
+                    0 => "01 Central Station",
+                    1 => "02 Perimeter Station",
+                    _ => "03 West Station"
+                }, hub.transform);
                 station.position = point;
-                var response = new OutdoorInterceptorResponse(alerts, filter, point, roadPosts, pursuitTime, pursuitDistance);
+                var response = new OutdoorInterceptorResponse(alerts, filter, point, roadPosts, pursuitTime, pursuitDistance,
+                    leadHorizon);
                 response.BuildGraph(station);
                 var brain = OutdoorDroneEncounter.Spawn<InterceptorBrain>(world, prefab, player, "Control", 2,
-                    $"Interceptor {slot + 1:00}", materials.Control, materials, font, seed, station, "Response Unit",
+                    $"Interceptor {slot + 1:00}", seed, station, "Response Unit",
                     interceptor: response);
                 if (brain != null) hub.stations.Add(brain);
             }
@@ -71,7 +85,7 @@ namespace ShiftFour
             for (int direction = 0; direction < (radius == 0f ? 1 : 12); direction++)
             {
                 Vector3 local = anchor + Quaternion.Euler(0f, direction * 30f, 0f) * Vector3.forward * radius;
-                if (slot == 1 && local.x < boundary - 22f) continue;
+                if ((slot == 1 && local.x < boundary - 22f) || (slot == 2 && local.x > -boundary + 22f)) continue;
                 if (NavMesh.SamplePosition(world.TransformPoint(local), out NavMeshHit hit, 1.5f, filter) &&
                     Mathf.Abs(world.InverseTransformPoint(hit.position).y) < .35f && alerts.AllowsTarget(hit.position) &&
                     System.Array.TrueForAll(deployed, other =>
@@ -122,25 +136,40 @@ namespace ShiftFour
         private void OnScoutAlert(OutdoorScout scout, Vector3 report)
         {
             if (!isActiveAndEnabled || scout == null || scout.State == OutdoorScout.Activity.Destroyed ||
-                Time.time < nextOrderAt || (responder != null && responder.IsResponding) || !alerts.AllowsTarget(report)) return;
+                Time.time < nextOrderAt || responders.Count >= responseLimit || !alerts.AllowsTarget(report)) return;
+            if (Time.time < suppressReportUntil &&
+                OutdoorScoutEncounter.FlatDistanceSquared(report, lastReport) < 8f * 8f) return;
             InterceptorBrain nearest = null;
             Vector3 destination = default;
             float shortest = float.PositiveInfinity;
             foreach (InterceptorBrain station in stations)
             {
-                if (station == null || !station.TryPlanResponse(report, out Vector3 goal, out float cost) || cost >= shortest)
+                if (station == null || station.IsResponding ||
+                    !station.TryPlanResponse(report, out Vector3 goal, out float cost) || cost >= shortest)
                     continue;
                 nearest = station;
                 shortest = cost;
                 destination = goal;
             }
-            if (nearest == null) return;
+            if (nearest == null)
+            {
+                nextOrderAt = Time.time + .5f;
+                return;
+            }
 
-            responder = nearest;
+            responders.Add(nearest);
+            lastReport = report;
             nextOrderAt = Time.time + cooldown;
             warningUntil = Time.unscaledTime + 2.8f;
-            responder.DispatchResponse(report, destination, shortest);
-            Debug.Log($"{responder.name} responding to {scout.name} at {report} ({shortest:0} m route).", responder);
+            nearest.DispatchResponse(report, destination, shortest);
+            Debug.Log($"{nearest.name} responding to {scout.name} at {report} ({shortest:0} m route).", nearest);
+        }
+
+        private void LateUpdate()
+        {
+            if (responders.RemoveAll(unit => unit == null || !unit.IsResponding) == 0) return;
+            nextOrderAt = Mathf.Max(nextOrderAt, Time.time + Mathf.Min(2.5f, cooldown));
+            suppressReportUntil = Time.time + cooldown;
         }
 
         private void OnDisable()
