@@ -28,7 +28,8 @@ namespace ShiftFour
                 return equipment != null && equipment.HasCheckpointKey ? string.Empty : KeyRequired;
             }
         }
-        public string Prompt => unlocking || IsOpen ? Granted : "E: UNLOCK CHECKPOINT DOOR";
+        public string Prompt => unlocking || IsOpen ? Granted :
+            equipment != null && equipment.HasCheckpointKey ? "E: UNLOCK CHECKPOINT DOOR" : KeyRequired;
 
         internal static void Build(Transform checkpoint, OutdoorPlayerEquipment owner, PrototypeMaterials m, Font font)
         {

@@ -65,7 +65,9 @@ Shader "ShiftFour/Hall Instrumentation"
                     float y = .5 + .45 * sin(t * 1.4);
                     float beam = stroke(uv.y-y,.002);
                     float ticks = step(.965,abs(p.x)) * step(.72,frac(uv.y*16));
-                    return lightInk(ink,1,max(beam * .42,ticks * .78));
+                    float verifying = step(.001,_Level) * (1-step(.99,_Level));
+                    float wash = exp(-40*abs(uv.y-y)) * verifying;
+                    return lightInk(ink,1,max(beam * (.34 + .36*verifying) + .12*wash,ticks * .76));
                 }
                 if (_Pattern < 1.5) // Segmented indicator / conduit.
                 {
@@ -117,6 +119,34 @@ Shader "ShiftFour/Hall Instrumentation"
                                       stroke(abs(p.y)-.43,.014)*step(abs(p.x),.51));
                     float sweep=exp(-8*abs(p.y-.86*sin(t*.54)));
                     return lightInk(ink,1,.13*grid(uv,10)+.52*streets+outline+.11*sweep);
+                }
+                if (_Pattern > 15.5) // Diagnostic waveform with a time sweep.
+                {
+                    float y=.45+.18*sin(uv.x*23-t*1.3)+.09*sin(uv.x*48+t);
+                    return lightInk(ink,1,.14*grid(uv,float2(18,5))+.77*stroke(uv.y-y,.012));
+                }
+                if (_Pattern > 14.5) // Survey coordinates come from generated geometry.
+                {
+                    float sweep=exp(-34*abs(uv.y-frac(t*.16)));
+                    return lightInk(ink,1,.12*grid(uv,12)+.18*sweep+.5*stroke(max(abs(p.x),abs(p.y))-.985,.008));
+                }
+                if (_Pattern > 13.5) // Reader and lane share one clock for the segmented verification strip.
+                {
+                    float cell = smoothstep(.06,.12,frac(uv.x*18))*(1-smoothstep(.84,.92,frac(uv.x*18)));
+                    return lightInk(ink,1,cell * (.18 + .77*step(uv.x,saturate(_Level))));
+                }
+                if (_Pattern > 12.5) // Inlaid floor chevrons point toward inspection.
+                {
+                    float v = frac(uv.y*8);
+                    float arrow = stroke(v - .60 + abs(p.x)*.22,.035)*step(abs(p.x),.87);
+                    return lightInk(ink,.8,arrow*(.63+.13*sin(3*uv.y-t)));
+                }
+                if (_Pattern > 11.5) // Etched credential outline, chip and contact lines.
+                {
+                    float border = stroke(max(abs(p.x)-.92,abs(p.y)-.84),.025);
+                    float chip = stroke(max(abs(p.x+.44)-.19,abs(p.y)-.39),.022);
+                    float lines = step(-.08,p.x)*step(p.x,.71)*step(abs(p.y),.44)*stroke(frac(uv.y*6)-.5,.055);
+                    return lightInk(ink,1,.08+.85*saturate(border+chip+lines));
                 }
                 if (_Pattern > 10.5) // Projected containment rings and vertical bus contacts.
                 {

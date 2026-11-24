@@ -216,6 +216,7 @@ namespace ShiftFour
             {
                 // Unity skips OnDestroy on components whose staged world was never activated.
                 next.GetComponentInChildren<OutdoorScenery>(true)?.ReleaseMeshes();
+                foreach (var hall in next.GetComponentsInChildren<HallInstrumentation>(true)) hall.ReleaseInspectionMeshes();
                 Discard(next);
                 Debug.LogWarning($"Open World: generation failed for seed {layoutSeed}. Keeping the current layout. {exception}", this);
                 return false;
@@ -302,6 +303,7 @@ namespace ShiftFour
         private void ConfigureDroneCombat(Transform layout, OutdoorScoutEncounter outdoors, Camera viewer)
         {
             outdoorCombat = outdoors;
+            Font stencilFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             combatDrones = layout.GetComponentsInChildren<DroneBrain>();
             for (int slot = 0; slot < combatDrones.Length; slot++)
             {
@@ -316,7 +318,7 @@ namespace ShiftFour
                 // 1911 body shots deal about 18.3 HP after the shared combat duration scaling.
                 float maximum = drone switch { ScoutBrain => 35f, GuardBrain => 48f, FlankerBrain => 54f, _ => 51f };
                 drone.ConfigurePrototypeCombat(tuning, slot, maximum, drone is GuardBrain ? null : outdoors);
-                drone.GetComponentInChildren<DroneRotorVisuals>()?.ConfigureOutdoorFlight(viewer, slot);
+                drone.GetComponentInChildren<DroneRotorVisuals>()?.ConfigureOutdoorFlight(viewer, slot, stencilFont, materials.Lettering);
             }
         }
 
@@ -541,6 +543,8 @@ namespace ShiftFour
             if (hasHud)
             {
                 feedback.SetMissions(layout, spawn, checkpoint, server, control, storage, extraction);
+                buildings?.Find("Control/Interior/Hall instrumentation")?.GetComponent<HallInstrumentation>()
+                    ?.BindCommandMap(feedback.Map, extraction);
                 feedback.SetProgression(layout.GetComponentInChildren<OutdoorSupplyCache>(),
                     layout.GetComponentInChildren<CheckpointAccessDoor>(),
                     buildings?.Find("Server/Server Access Door")?.GetComponent<BuildingAccessDoor>(),

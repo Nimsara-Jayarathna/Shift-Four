@@ -81,7 +81,7 @@ namespace ShiftFour
         internal void Refresh()
         {
             if (mission == null) return;
-            string next = mission.Escaped ? "FACILITY ESCAPED" : mission.IsReady ? Available : Locked;
+            string next = mission.Escaped ? "EXTRACTION AUTHORIZED" : mission.IsReady ? Available : Locked;
             if (Status == next) return;
             Status = next;
             status.text = next;
@@ -89,8 +89,15 @@ namespace ShiftFour
             foreach (Renderer lamp in lamps) SetTint(lamp, color);
             SetTint(display, color);
             foreach (Light glow in glows) glow.color = color;
-            if (mission.Escaped)
-                shutter.localPosition = Vector3.up * 4f;
+        }
+
+        internal void SetOpening(float fraction)
+        {
+            if (shutter == null) return;
+            float lift = Mathf.Clamp01(fraction);
+            shutter.localPosition = Vector3.up * (4f * lift);
+            foreach (Light glow in glows)
+                if (glow != null) glow.intensity = 3f + .8f * Mathf.Sin(Mathf.PI * lift);
         }
 
         private void SetTint(Renderer target, Color color)

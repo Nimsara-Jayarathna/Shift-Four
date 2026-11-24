@@ -30,6 +30,7 @@ namespace ShiftFour
         public bool IsComplete => completed == ActivationOrder.Length;
         internal event System.Action<ServerNetworkPuzzle> Completed;
         internal event System.Action<ServerTerminal> TerminalActivated;
+        internal event System.Action<ServerTerminal> SequenceRejected;
         public string Objective => $"Restore Server Network ({completed}/{ActivationOrder.Length})";
         public string Prompt => "E: Read Server Sequence";
         public bool HasWarning => warning != null;
@@ -65,6 +66,7 @@ namespace ShiftFour
             {
                 ResetPuzzle();
                 warning = StartCoroutine(FlashWarning());
+                SequenceRejected?.Invoke(terminal);
                 return;
             }
 

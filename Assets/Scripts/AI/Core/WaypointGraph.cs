@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 using UnityEngine.AI;
 using Unity.Profiling;
@@ -30,6 +31,7 @@ namespace ShiftFour
         [SerializeField] private GraphEdge[] edges;
         private readonly bool[] gatesOpen = new bool[4];
         private Func<Vector3, Vector3, bool> connectionValidator;
+        private NavMeshPath connectorPath;
         [SerializeField] private int contractVersion;
         public int ContractVersion => contractVersion;
         public bool IsKnownLegacyLayout
@@ -55,7 +57,11 @@ namespace ShiftFour
         }
 
         internal void SetConnectionValidator(Func<Vector3, Vector3, bool> validator)
-            => connectionValidator = validator;
+        {
+            if (connectionValidator == validator) return;
+            connectionValidator = validator;
+            Version++;
+        }
 
         public void SetDoorOpen(bool open) => SetGateOpen(0, open);
 
@@ -71,42 +77,192 @@ namespace ShiftFour
         public Vector3 NodePosition(int index) => nodes[index].position;
         public int NodeCount => nodes == null ? 0 : nodes.Length;
 
-        public List<Vector3> FindRoute(Vector3 origin, Vector3 destination)
+        internal bool TryNodePosition(int index, out Vector3 position)
+        {
+            position = default;
+            if (index < 0 || index >= NodeCount || nodes[index] == null) return false;
+            position = nodes[index].position;
+            return IsFinite(position);
+        }
+
+        internal struct SearchVisit
+        {
+            internal int Node, Parent;
+            internal float G, H;
+        }
+
+        internal sealed class SearchTrace
+        {
+            internal readonly List<SearchVisit> Visits = new();
+            internal string Result { get; private set; }
+
+            internal void Finish(string result) => Result = result;
+
+            internal string Describe()
+            {
+                var text = new StringBuilder(Result);
+                int first = Mathf.Max(0, Visits.Count - 4);
+                for (int i = first; i < Visits.Count; i++)
+                {
+                    SearchVisit visit = Visits[i];
+                    string parent = visit.Parent < 0 ? "origin" : $"N{visit.Parent + 1}";
+                    text.Append($"\nN{visit.Node + 1} ← {parent}   G {visit.G:F1}  H {visit.H:F1}  F {visit.G + visit.H:F1}");
+                }
+                if (first > 0) text.Append($"\n{Visits.Count} visits total");
+                return text.ToString();
+            }
+        }
+
+        public List<Vector3> FindRoute(Vector3 origin, Vector3 destination) => FindRouteWithTrace(origin, destination, null);
+
+        internal List<Vector3> FindRouteWithTrace(Vector3 origin, Vector3 destination, SearchTrace trace)
         {
             using var sample = RouteMarker.Auto();
-            List<Vector3> route = new List<Vector3>();
-            if (nodes == null || nodes.Length == 0 || edges == null ||
-                !IsFinite(origin) || !IsFinite(destination)) return route;
-            if (connectionValidator != null && CanConnect(origin, destination))
+            trace?.Visits.Clear();
+            var route = new List<Vector3>();
+            trace?.Finish("No route");
+            if (NodeCount == 0 || edges == null || !IsFinite(origin) || !IsFinite(destination)) return route;
+
+            bool hasClosedEdge = false;
+            foreach (GraphEdge edge in edges)
+                if (edge.gateId >= 0 && !IsGateOpen(edge.gateId) && TryNodePosition(edge.from, out _) &&
+                    TryNodePosition(edge.to, out _))
+                { hasClosedEdge = true; break; }
+
+            if (connectionValidator != null && !hasClosedEdge && CanConnect(origin, destination))
             {
                 route.Add(destination);
+                trace?.Finish("Direct validated connector");
                 return route;
             }
-            int start = Nearest(origin);
-            int goal = Nearest(destination);
+
+            int start = Nearest(origin), goal = Nearest(destination);
             if (start < 0 || goal < 0) return route;
-            // A shared nearest node does not prove that two world positions are connected.
-            if (start == goal && connectionValidator == null)
+            if (start == goal && connectionValidator == null && CanConnect(origin, destination))
             {
-                if (CanConnect(origin, destination)) route.Add(destination);
+                route.Add(destination);
+                trace?.Finish("Direct within the same waypoint area");
                 return route;
             }
-            // A geometrically nearer waypoint may be on the other side of a locked gate.
-            // Keep the normal attachment when valid; otherwise try the nearest connected node.
             if (!CanConnect(origin, nodes[start].position))
-                start = Nearest(origin, position => CanConnect(origin, position));
+                start = Nearest(origin, point => CanConnect(origin, point));
             if (!CanConnect(nodes[goal].position, destination))
-                goal = Nearest(destination, position => CanConnect(position, destination));
+                goal = Nearest(destination, point => CanConnect(point, destination));
             if (start < 0 || goal < 0) return route;
-            int size = nodes.Length;
+
+            if (Search(origin, destination, start, goal, null, null, route, trace))
+            {
+                trace?.Finish($"A*   N{start + 1} to N{goal + 1}");
+                return route;
+            }
+
+            // Keep exact-node queries attached to their authored nodes. For an off-node
+            // endpoint, try local alternatives only after the preferred route fails.
+            if (origin == nodes[start].position && destination == nodes[goal].position) return route;
+            var starts = Attachments(origin, start, hasClosedEdge, incoming: true);
+            var goals = Attachments(destination, goal, hasClosedEdge, incoming: false);
+            if (starts.Count + goals.Count <= 2) return route;
+            trace?.Visits.Clear();
+            if (Search(origin, destination, start, goal, starts, goals, route, trace))
+                trace?.Finish("A* via alternate attachment");
+            return route;
+        }
+
+        private const int AttachmentLimit = 4;
+        private const float LocalAttachmentRadius = 4f;
+
+        private List<int> Attachments(Vector3 endpoint, int preferred, bool hasClosedEdge, bool incoming)
+        {
+            var result = new List<int> { preferred };
+            if (endpoint == nodes[preferred].position) return result;
+
+            // Local connector edges must not jump between components separated by a
+            // closed authored gate, even while NavMesh carving is catching up.
+            bool[] openRegion = hasClosedEdge ? ReachableNodes(preferred, respectGates: true) : null;
+            bool[] fullRegion = hasClosedEdge ? ReachableNodes(preferred, respectGates: false) : null;
+            var candidates = new List<int>();
+            for (int i = 0; i < NodeCount; i++)
+                if (i != preferred && TryNodePosition(i, out Vector3 point) &&
+                    (point - endpoint).sqrMagnitude <= LocalAttachmentRadius * LocalAttachmentRadius &&
+                    (fullRegion == null || !fullRegion[i] || openRegion[i]))
+                    candidates.Add(i);
+            candidates.Sort((a, b) => (nodes[a].position - endpoint).sqrMagnitude
+                .CompareTo((nodes[b].position - endpoint).sqrMagnitude));
+
+            // Cap both physical probes and accepted attachments. A local alternative is
+            // a direct NavMesh segment, so it cannot route through the mesh around a gate.
+            for (int i = 0; i < Mathf.Min(candidates.Count, AttachmentLimit) && result.Count < AttachmentLimit; i++)
+            {
+                int node = candidates[i];
+                Vector3 point = nodes[node].position;
+                if (incoming ? CanConnectLocally(endpoint, point) : CanConnectLocally(point, endpoint))
+                    result.Add(node);
+            }
+            return result;
+        }
+
+        private bool CanConnectLocally(Vector3 from, Vector3 to)
+        {
+            using var sample = ConnectMarker.Auto();
+            if (connectionValidator != null && !connectionValidator(from, to)) return false;
+            return NavMesh.SamplePosition(from, out var start, .25f, NavMesh.AllAreas) &&
+                NavMesh.SamplePosition(to, out var end, .25f, NavMesh.AllAreas) &&
+                !NavMesh.Raycast(start.position, end.position, out _, NavMesh.AllAreas);
+        }
+
+        private bool[] ReachableNodes(int start, bool respectGates)
+        {
+            var reached = new bool[NodeCount];
+            var queue = new Queue<int>();
+            reached[start] = true;
+            queue.Enqueue(start);
+            while (queue.Count > 0)
+            {
+                int current = queue.Dequeue();
+                foreach (var edge in edges)
+                {
+                    int next = OtherEnd(edge, current, respectGates);
+                    if (next < 0 || reached[next]) continue;
+                    reached[next] = true;
+                    queue.Enqueue(next);
+                }
+            }
+            return reached;
+        }
+
+        private int OtherEnd(GraphEdge edge, int current, bool respectGates)
+        {
+            if (edge.gateId < -1 || edge.gateId >= gatesOpen.Length ||
+                (respectGates && edge.gateId >= 0 && !IsGateOpen(edge.gateId))) return -1;
+            int next = edge.from == current ? edge.to : edge.to == current ? edge.from : -1;
+            return TryNodePosition(next, out _) ? next : -1;
+        }
+
+        private bool Search(Vector3 origin, Vector3 destination, int start, int goal,
+            List<int> starts, List<int> goals, List<Vector3> route, SearchTrace trace)
+        {
+            int size = NodeCount;
             float[] cost = new float[size];
             int[] parent = new int[size];
             bool[] closed = new bool[size];
             bool[] open = new bool[size];
-            for (int i = 0; i < size; i++) { cost[i] = float.PositiveInfinity; parent[i] = -1; }
-            cost[start] = 0f;
-            open[start] = true;
+            Array.Fill(cost, float.PositiveInfinity);
+            Array.Fill(parent, -1);
+            if (starts == null)
+            {
+                open[start] = true;
+                cost[start] = Vector3.Distance(origin, nodes[start].position);
+            }
+            else
+                foreach (int node in starts)
+                {
+                    open[node] = true;
+                    cost[node] = Vector3.Distance(origin, nodes[node].position);
+                }
 
+            // Use the world endpoint as the heuristic for multiple goal attachments.
+            // Their Euclidean tail cost equals H, so the first popped goal is optimal.
+            Vector3 heuristicTarget = goals == null ? nodes[goal].position : destination;
             while (true)
             {
                 int current = -1;
@@ -114,38 +270,35 @@ namespace ShiftFour
                 for (int i = 0; i < size; i++)
                 {
                     if (!open[i]) continue;
-                    float f = cost[i] + Vector3.Distance(nodes[i].position, nodes[goal].position);
+                    float f = cost[i] + Vector3.Distance(nodes[i].position, heuristicTarget);
                     if (f < bestF) { bestF = f; current = i; }
                 }
-                if (current < 0) return route; // No traversable route.
-                if (current == goal) break;
+                if (current < 0) return false;
+                Vector3 position = nodes[current].position;
+                trace?.Visits.Add(new SearchVisit { Node = current, Parent = parent[current],
+                    G = cost[current], H = Vector3.Distance(position, heuristicTarget) });
+                if (goals == null ? current == goal : goals.Contains(current))
+                {
+                    for (int at = current; at >= 0; at = parent[at])
+                        if (parent[at] >= 0 || origin != nodes[at].position) route.Add(nodes[at].position);
+                    route.Reverse();
+                    if (route.Count == 0 || route[route.Count - 1] != destination) route.Add(destination);
+                    return true;
+                }
+
                 open[current] = false;
                 closed[current] = true;
-
-                foreach (GraphEdge edge in edges)
+                foreach (var edge in edges)
                 {
-                    if (edge.gateId < -1 || (edge.gateId >= 0 && !IsGateOpen(edge.gateId))) continue;
-                    int next = edge.from == current ? edge.to : edge.to == current ? edge.from : -1;
-                    if (next < 0 || next >= size || closed[next] ||
-                        nodes[next] == null || !IsFinite(nodes[next].position)) continue;
-                    float candidate = cost[current] + Vector3.Distance(nodes[current].position, nodes[next].position);
+                    int next = OtherEnd(edge, current, respectGates: true);
+                    if (next < 0 || closed[next]) continue;
+                    float candidate = cost[current] + Vector3.Distance(position, nodes[next].position);
                     if (candidate >= cost[next]) continue;
                     cost[next] = candidate;
                     parent[next] = current;
                     open[next] = true;
                 }
             }
-
-            List<int> order = new List<int>();
-            for (int at = goal; at >= 0; at = parent[at]) order.Add(at);
-            order.Reverse();
-            foreach (int index in order)
-                // Only the initial point may already be reached; later nodes define the route.
-                if (index != start || origin != nodes[index].position)
-                    route.Add(nodes[index].position);
-            if (route.Count == 0 || route[route.Count - 1] != destination)
-                route.Add(destination);
-            return route;
         }
 
         private static bool IsFinite(Vector3 point)
@@ -159,9 +312,9 @@ namespace ShiftFour
             // SamplePosition alone does not establish connectivity across walls or gates.
             if (!NavMesh.SamplePosition(from, out NavMeshHit start, 0.25f, NavMesh.AllAreas) ||
                 !NavMesh.SamplePosition(to, out NavMeshHit end, 0.25f, NavMesh.AllAreas)) return false;
-            NavMeshPath path = new NavMeshPath();
-            return NavMesh.CalculatePath(start.position, end.position, NavMesh.AllAreas, path) &&
-                path.status == NavMeshPathStatus.PathComplete;
+            connectorPath ??= new NavMeshPath();
+            return NavMesh.CalculatePath(start.position, end.position, NavMesh.AllAreas, connectorPath) &&
+                connectorPath.status == NavMeshPathStatus.PathComplete;
         }
 
         private int Nearest(Vector3 point, Predicate<Vector3> canConnect = null)

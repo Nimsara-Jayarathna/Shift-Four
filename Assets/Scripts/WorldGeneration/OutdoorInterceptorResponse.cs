@@ -19,19 +19,21 @@ namespace ShiftFour
         private readonly Vector3 station;
         private readonly List<Vector3> roads = new List<Vector3>();
         private readonly float pursuitTime, pursuitDistance;
-        private Vector3 lastKnown, goal, motion;
+        private Vector3 lastKnown, goal;
         private float alertEnds, responseEnds, reportExpires, planAt, searchEnds, burstReadyAt;
         private int fired, searchStep;
-        private bool seen, ahead;
+        private bool seen, ahead, sightLastTick;
         private Vector3 lastBurstPost;
         private int burstCount;
         private bool relocationPlanned;
 
         internal Phase State { get; private set; }
+        internal Vector3 LastReport => lastKnown;
         internal bool IsResponding => State is Phase.Alerted or Phase.Intercept or Phase.Attack or Phase.Reposition or Phase.Search;
         internal float LeadHorizon { get; }
         internal WaypointGraph Graph { get; private set; }
         internal Vector3[] Posts { get; }
+        internal IReadOnlyList<Vector3> RoadJunctions => roads;
 
         internal OutdoorInterceptorResponse(OutdoorScoutEncounter outdoors, NavMeshQueryFilter filter, Vector3 station,
             List<Vector3> roadPosts, float pursuitTime, float pursuitDistance, float leadHorizon)
@@ -103,11 +105,11 @@ namespace ShiftFour
             planAt = searchEnds = 0f;
             fired = searchStep = 0;
             burstCount = 0;
-            seen = ahead = relocationPlanned = false;
+            seen = ahead = relocationPlanned = sightLastTick = false;
         }
 
         internal DecisionOption Decide(InterceptorBrain brain, InterceptorPolicy prediction, ControlTacticalRouteValidator routes,
-            bool visible, Vector3 playerPosition, Vector3 observedMotion, float speed, Vector3 ownVelocity, float acceleration)
+            bool visible, Vector3 playerPosition, float speed, Vector3 ownVelocity, float acceleration)
         {
             Vector3 position = brain.transform.position;
             float now = Time.time;
@@ -119,6 +121,8 @@ namespace ShiftFour
             if (now >= responseEnds || (!seen && now >= reportExpires))
                 return Return();
 
+            bool sightChanged = visible != sightLastTick;
+            sightLastTick = visible;
             if (visible)
             {
                 lastKnown = playerPosition;
@@ -138,11 +142,11 @@ namespace ShiftFour
                     }
                     return Option("Reposition between response bursts", goal);
                 }
-                if (State == Phase.Reposition) planAt = 0f;
+                if (sightChanged || State is Phase.Reposition or Phase.Search) planAt = 0f;
                 if (now >= planAt)
                 {
                     planAt = now + (brain.IsAggressive ? .28f : .4f);
-                    PlanIntercept(prediction, routes, position, playerPosition, observedMotion, speed, ownVelocity, acceleration);
+                    PlanFromSightings(prediction, routes, true, position, playerPosition, speed, ownVelocity, acceleration);
                 }
                 float distance = DistanceSquared(position, playerPosition);
                 float attackDistance = State == Phase.Attack ? AttackDistance : AttackDistance - .55f;
@@ -155,6 +159,22 @@ namespace ShiftFour
 
                 State = Phase.Intercept;
                 return Option(ahead ? "Intercept ahead on road" : "Pursue last known area", goal);
+            }
+
+            if (seen && prediction.History.Count > 0)
+            {
+                if (sightChanged || now >= planAt || State is Phase.Attack or Phase.Reposition)
+                {
+                    planAt = now + .4f;
+                    PlanFromSightings(prediction, routes, false, position, default, speed, ownVelocity, acceleration);
+                }
+                return prediction.State switch
+                {
+                    InterceptorState.InterceptAhead => HiddenOrder(Phase.Intercept, "Continue confirmed interception"),
+                    InterceptorState.PursueLastKnown => HiddenOrder(Phase.Intercept, "Pursue last sighting"),
+                    InterceptorState.SearchLastSeenArea => HiddenOrder(Phase.Search, "Search last seen area"),
+                    _ => Return()
+                };
             }
 
             if (!seen && State != Phase.Search && DistanceSquared(position, goal) > 1.5f * 1.5f)
@@ -183,73 +203,38 @@ namespace ShiftFour
             return Option("Search last known area", goal);
         }
 
-        private void PlanIntercept(InterceptorPolicy policy, ControlTacticalRouteValidator routes, Vector3 position,
-            Vector3 playerPosition, Vector3 observedMotion, float speed, Vector3 ownVelocity, float acceleration)
+        private DecisionOption HiddenOrder(Phase phase, string label)
         {
-            motion = Flat(observedMotion);
+            if (fired > 0) burstReadyAt = Time.time + 2.2f;
+            fired = 0;
+            State = phase;
+            return Option(label, goal);
+        }
+
+        private void PlanFromSightings(InterceptorPolicy policy, ControlTacticalRouteValidator routes, bool visible,
+            Vector3 position, Vector3 playerPosition, float speed, Vector3 ownVelocity, float acceleration)
+        {
             routes.BeginDecision();
             try
             {
-                DecisionOption prediction = policy.StepWithMotion(Time.time, true, playerPosition, position, station,
+                DecisionOption prediction = policy.StepWithMotion(Time.time, visible, playerPosition, position, station,
                     speed, ownVelocity, acceleration, Graph.Version, roads, routes.Route,
-                    (from, to) => PossibleRoad(from, to) ? routes.PlayerRoute(from, to) : null);
-                ahead = policy.State == InterceptorState.InterceptAhead &&
-                    InterceptorPolicy.ValidRoute(policy.PlannedRoute);
-                if (ahead)
-                    goal = prediction.Destination;
-                else if (policy.History.Count >= 3 && policy.Confidence >= .38f &&
-                    TryRoadLead(position, playerPosition, routes, speed, out Vector3 lead))
+                    (from, to) => Flat(to - from).sqrMagnitude <= Mathf.Pow(6f * LeadHorizon, 2)
+                        ? routes.PlayerRoute(from, to) : null);
+                ahead = policy.State == InterceptorState.InterceptAhead;
+                goal = prediction.Destination;
+                // A visible player's capsule may block the endpoint. Retain the existing
+                // clear standoff approach for engagements without a viable interception.
+                if (visible && !ahead)
                 {
-                    ahead = true;
-                    goal = lead;
-                }
-                else if (FindStandoff(position, playerPosition, routes, out Vector3 approach, out _))
-                    goal = approach;
-                else
                     goal = position;
+                    if (FindStandoff(position, playerPosition, routes, out Vector3 approach, out _))
+                    {
+                        goal = approach;
+                    }
+                }
             }
             finally { routes.EndDecision(); }
-        }
-
-        private bool TryRoadLead(Vector3 origin, Vector3 target, ControlTacticalRouteValidator routes, float speed,
-            out Vector3 lead)
-        {
-            lead = default;
-            float playerSpeed = Mathf.Min(motion.magnitude, 6f);
-            if (playerSpeed < .7f) return false;
-            Vector3 heading = motion.normalized;
-            float bestScore = float.NegativeInfinity;
-            foreach (Vector3 point in roads)
-            {
-                Vector3 offset = Flat(point - target);
-                float alignment = Vector3.Dot(offset.normalized, heading);
-                float flightEstimate = Vector3.Distance(origin, point) / Mathf.Max(1f, speed);
-                float travelTime = offset.magnitude / playerSpeed;
-                if (alignment < .75f || offset.sqrMagnitude < 16f ||
-                    travelTime > LeadHorizon || flightEstimate > travelTime + .9f) continue;
-
-                var playerRoute = routes.PlayerRoute(target, point);
-                if (!InterceptorPolicy.ValidRoute(playerRoute)) continue;
-                float playerTime = InterceptorPolicy.Length(playerRoute) / playerSpeed;
-                if (playerTime > LeadHorizon) continue;
-                var flightRoute = routes.Route(origin, point);
-                if (!InterceptorPolicy.ValidRoute(flightRoute)) continue;
-                float flightTime = InterceptorPolicy.Length(flightRoute) / Mathf.Max(1f, speed);
-                if (flightTime > playerTime + .75f) continue;
-                float score = alignment * 4f + Mathf.Min(playerTime - flightTime, 1f) - playerTime * .35f;
-                if (score <= bestScore) continue;
-                bestScore = score;
-                lead = point;
-            }
-            return float.IsFinite(bestScore);
-        }
-
-        private bool PossibleRoad(Vector3 from, Vector3 to)
-        {
-            Vector3 offset = Flat(to - from);
-            float maxLead = Mathf.Min(26f, 6f * LeadHorizon);
-            return offset.sqrMagnitude <= maxLead * maxLead && (motion.sqrMagnitude < .3f ||
-                Vector3.Dot(offset.normalized, motion.normalized) > .35f);
         }
 
         private Vector3 FindBurstPosition(Vector3 origin, Vector3 target, ControlTacticalRouteValidator routes)

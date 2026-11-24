@@ -84,7 +84,7 @@ namespace ShiftFour
             using var profileSample=DecisionProfile.Auto();
             if (response != null)
             {
-                var order = response.Decide(this, policy, responseRoutes, visible, playerPosition, ObservedVelocity,
+                var order = response.Decide(this, policy, responseRoutes, visible, visible ? playerPosition : default,
                     MovementSettings.chaseSpeed, Motor.ActualVelocity, responseAgent.acceleration);
                 Motor.SetMovementMode(response.State is OutdoorInterceptorResponse.Phase.Alerted or
                     OutdoorInterceptorResponse.Phase.Intercept or OutdoorInterceptorResponse.Phase.Attack or
@@ -161,8 +161,8 @@ namespace ShiftFour
 
         private void LateUpdate()
         {
-            if (HasPrototypeTempo || !Alive || Player == null || response?.State != OutdoorInterceptorResponse.Phase.Attack) return;
-            Vector3 heading = Vector3.ProjectOnPlane(Player.transform.position - transform.position, Vector3.up);
+            if (HasPrototypeTempo || !Alive || WeaponAimPoint is not Vector3 aim || response?.State != OutdoorInterceptorResponse.Phase.Attack) return;
+            Vector3 heading = Vector3.ProjectOnPlane(aim - transform.position, Vector3.up);
             if (heading.sqrMagnitude > .01f)
                 transform.rotation = Quaternion.RotateTowards(transform.rotation, Quaternion.LookRotation(heading),
                     responseAgent.angularSpeed * Time.deltaTime);
@@ -269,6 +269,17 @@ namespace ShiftFour
                 return ControlRoute(to);
             return validator.Route(from, to);
         }
+
+        internal bool DiagnosticAlive => Alive;
+        internal OutdoorInterceptorResponse.Phase? OutdoorPhase => response?.State;
+        internal Vector3? ReportedPosition => response != null ? response.LastReport :
+            policy != null && float.IsFinite(policy.LastObservedAt) ? policy.LastObserved : null;
+        internal string ResponsePhase => response?.State.ToString();
+        internal IReadOnlyList<Vector3> ResponseJunctions => response?.RoadJunctions;
+        internal IReadOnlyList<Vector3> ActiveAStarRoute => Motor != null && Motor.HasRoute ? Motor.RouteForDiagnostics : null;
+        internal int ActiveRouteStep => Motor != null ? Motor.RouteStepForDiagnostics : 0;
+        internal WaypointGraph DiagnosticGraph => NavigationGraph;
+        internal DroneMotor DiagnosticMotor => Motor;
 
         private void OnDrawGizmosSelected()
         {

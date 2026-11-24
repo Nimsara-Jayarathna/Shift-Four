@@ -9,7 +9,7 @@ namespace ShiftFour
         // Slightly tinted task lights retain neutral highlights on keycards, terminals and power cells.
         private static readonly Color[] RoomLights =
         {
-            new Color(1f, .81f, .59f), new Color(.68f, .85f, 1f),
+            new Color(.88f, .94f, 1f), new Color(.68f, .85f, 1f),
             new Color(.66f, .94f, .86f), new Color(1f, .75f, .51f)
         };
 
@@ -83,15 +83,19 @@ namespace ShiftFour
             Transform desk = props.Find("Security desk");
             Transform pickup = Group("Security Access Card", desk, new Vector3(1.02f, 1.12f, -.34f));
             pickup.localRotation = Quaternion.Euler(18, 0, 0);
-            Box("Card body", pickup, Vector3.zero, new Vector3(.42f, .24f, .045f), signal);
-            Box("Card chip", pickup, new Vector3(.08f, .02f, -.024f),
-                new Vector3(.12f, .07f, .02f), m.Metal, false);
+            Box("Card body", pickup, Vector3.zero, new Vector3(.42f, .24f, .045f), m.Metal);
+            Box("Credential laminate", pickup, new Vector3(0, 0, -.023f), new Vector3(.39f,.21f,.006f), m.Wall, false);
+            Box("Encoded stripe", pickup, new Vector3(-.124f, 0, -.029f), new Vector3(.052f,.20f,.006f), signal, false);
+            Label("ID  /  01", pickup, new Vector3(.035f, -.064f, -.031f), .034f, font, .22f, .047f, m.Lettering);
+            Box("Card chip", pickup, new Vector3(.08f, .025f, -.034f),
+                new Vector3(.12f, .07f, .02f), m.Checkpoint, false);
             var card = pickup.gameObject.AddComponent<SecurityAccessCard>();
             var glow = Group("Card glow", pickup, new Vector3(0, .15f, -.12f)).gameObject.AddComponent<Light>();
             glow.type = LightType.Point;
             glow.color = new Color(.16f, .85f, 1);
             glow.range = .85f;
-            glow.intensity = 1.25f;
+            glow.intensity = .40f;
+            glow.shadows = LightShadows.None;
 
             BuildCheckpointReader(props, card, m, font);
         }
@@ -113,7 +117,8 @@ namespace ShiftFour
                 new Vector3(.13f, .17f, .07f), signal, false).GetComponent<Renderer>();
             var indicatorLight = Group("Scanner glow", reader, new Vector3(.83f, .03f, -.28f)).gameObject.AddComponent<Light>();
             indicatorLight.type = LightType.Point;
-            indicatorLight.intensity = .75f;
+            indicatorLight.intensity = .19f;
+            indicatorLight.shadows = LightShadows.None;
             indicatorLight.range = .6f;
             Box("Scanner sign", reader, new Vector3(0, .67f, -.13f), new Vector3(2.15f, .29f, .06f), m.Metal, false);
             Label("SECURITY SCANNER", reader, new Vector3(0, .67f, -.173f), .13f, font, 1.98f, .23f, m.Lettering);
@@ -221,8 +226,8 @@ namespace ShiftFour
             var indicator = Box("Override indicator", panel, new Vector3(1.96f, 1.51f, -.29f),
                 new Vector3(.28f, .28f, .08f), signal, false).GetComponent<Renderer>();
             Label("LOCKDOWN OVERRIDE", panel, new Vector3(0, 2.10f, -.268f), .21f, font, 4.15f, .34f, m.Lettering);
-            TextMesh status = Label(ControlLockdownMission.LockdownDisabled + "\n" + ControlLockdownMission.CompletionMessage,
-                panel, new Vector3(-.26f, 1.52f, -.268f), .16f, font, 3.65f, .56f, m.Lettering);
+            TextMesh status = Label("SECURITY SUBSYSTEMS: 3 / 3\nOVERRIDE AUTHORIZED\nE: DISABLE LOCKDOWN",
+                panel, new Vector3(-.26f, 1.54f, -.268f), .16f, font, 3.65f, .69f, m.Lettering);
             var mission = panel.gameObject.AddComponent<ControlLockdownMission>();
 
             var switches = new[]
@@ -266,7 +271,7 @@ namespace ShiftFour
                 new Vector3(1.6f, .055f, .04f), m.Control, false);
             var lamp = Box("Switch indicator", roomSwitch, new Vector3(.59f, 1.47f, -.255f),
                 new Vector3(.22f, .22f, .075f), signal, false).GetComponent<Renderer>();
-            Label(name, roomSwitch, new Vector3(0, 1.76f, -.223f), .15f, font, 1.57f, .24f, m.Lettering);
+            Label($"SWITCH {number:00}", roomSwitch, new Vector3(0, 1.76f, -.223f), .15f, font, 1.57f, .24f, m.Lettering);
             TextMesh status = Label("DISABLED", roomSwitch, new Vector3(-.21f, 1.47f, -.223f), .11f, font, 1.08f, .18f, m.Lettering);
             var component = roomSwitch.gameObject.AddComponent<LockdownSecuritySwitch>();
             component.Configure(mission, number, lamp, status);

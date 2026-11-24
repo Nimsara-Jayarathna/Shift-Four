@@ -4,9 +4,10 @@ namespace ShiftFour
 {
     // Outdoor shooting feedback uses the shared audio and weapon state without a mission session.
     [RequireComponent(typeof(PlayerController), typeof(GameplayAudio))]
-    public sealed class PrototypePlayerFeedback : MonoBehaviour
+    public sealed partial class PrototypePlayerFeedback : MonoBehaviour
     {
         private PlayerController player;
+        private readonly GUIContent interactionText = new();
         private CheckpointSecurityScanner checkpoint;
         private ServerNetworkPuzzle server;
         private ControlLockdownMission control;
@@ -23,6 +24,7 @@ namespace ShiftFour
         internal FacilityMap Map { get; } = new FacilityMap();
         private Objective lastObjective;
         private float updatedUntil;
+        internal string FocusedPrompt => player != null && Cursor.lockState == CursorLockMode.Locked ? player.InteractionPrompt : string.Empty;
         internal bool ObjectiveUpdated => Time.time < updatedUntil;
 
         public OpenWorldMissionManager ExtractionManager => extraction;
@@ -45,6 +47,9 @@ namespace ShiftFour
         internal void SetMissions(Transform layout, Transform spawn, CheckpointSecurityScanner scanner, ServerNetworkPuzzle network,
             ControlLockdownMission lockdown, StoragePowerMission power, OpenWorldMissionManager finalMission)
         {
+            UnsubscribeFromMissions();
+            notices.Clear();
+            noticeAge = 0f;
             checkpoint = scanner;
             server = network;
             control = lockdown;
@@ -53,12 +58,15 @@ namespace ShiftFour
             Map.Bind(layout, spawn);
             lastObjective = default;
             updatedUntil = 0f;
+            SubscribeToMissions();
         }
 
         internal void SetProgression(OutdoorSupplyCache cache, CheckpointAccessDoor door,
             BuildingAccessDoor serverAccess, BuildingAccessDoor controlAccess, BuildingAccessDoor storageAccess)
         {
+            if (supplyCache != null) supplyCache.Discovered -= SuppliesTaken;
             supplyCache = cache;
+            if (isActiveAndEnabled && supplyCache != null) supplyCache.Discovered += SuppliesTaken;
             checkpointDoor = door;
             serverDoor = serverAccess;
             controlDoor = controlAccess;
@@ -111,8 +119,15 @@ namespace ShiftFour
                 GUI.DrawTexture(new Rect(x, y - 4, 1, 9), Texture2D.whiteTexture);
                 if (!string.IsNullOrEmpty(player.InteractionPrompt))
                 {
-                    Vector2 size = GUI.skin.box.CalcSize(new GUIContent(player.InteractionPrompt));
-                    GUI.Box(new Rect(x - size.x * .5f, y + 16, size.x, size.y), player.InteractionPrompt);
+                    interactionText.text = player.InteractionPrompt;
+                    Vector2 size = GUI.skin.box.CalcSize(interactionText);
+                    var prompt = new Rect(x - size.x * .5f - 8, y + 18, size.x + 16, size.y + 4);
+                    GUI.Box(prompt, interactionText);
+                    Color previous = GUI.color;
+                    GUI.color = player.InteractionPrompt.StartsWith("E:", System.StringComparison.Ordinal)
+                        ? new Color(.3f, .86f, .88f) : new Color(.95f, .75f, .43f);
+                    GUI.DrawTexture(new Rect(prompt.x, prompt.y, 2, prompt.height), Texture2D.whiteTexture);
+                    GUI.color = previous;
                 }
             }
 
@@ -157,10 +172,11 @@ namespace ShiftFour
             {
                 case Site.Supply when supplyCache != null:
                     return new(site, supplyCache.IsDiscovered ? Status.Complete : Status.Available,
-                        supplyCache.IsDiscovered ? "Pistol and Checkpoint key collected." : "Locate the supply station and collect your gear.");
+                        supplyCache.IsDiscovered ? "Pistol and Checkpoint key collected." : "Locate the supply station and collect your gear.",
+                        supplyCache.IsDiscovered ? 1 : 0, 1);
                 case Site.Checkpoint when checkpoint != null:
                     return Building(site, checkpoint.IsComplete, checkpointDoor == null || checkpointDoor.IsOpen,
-                        equipment != null && equipment.HasCheckpointKey, checkpoint.Objective);
+                        equipment != null && equipment.HasCheckpointKey, checkpoint.Objective, checkpoint.IsComplete ? 2 : checkpoint.HasCard ? 1 : 0, 2);
                 case Site.Server when server != null:
                     return Building(site, server.IsComplete, serverDoor == null || serverDoor.IsOpen,
                         equipment != null && equipment.HasServerKey, "Activate terminals in the displayed order.",
@@ -187,7 +203,13 @@ namespace ShiftFour
 
         private static Objective Building(Site site, bool complete, bool open, bool key, string task, int count = 0, int total = 0)
         {
-            if (complete) return new(site, Status.Complete, "Mission complete.", count, total);
+            if (complete) return new(site, Status.Complete, site switch
+            {
+                Site.Checkpoint => "Security card authenticated at the scanner.",
+                Site.Server => "Network restored. All terminals online.",
+                Site.Control => "Security switches disabled and lockdown lifted.",
+                _ => "Both power cells installed. Generator online."
+            }, count, total);
             if (open) return new(site, Status.InProgress, task, count, total);
             if (key) return new(site, Status.Available, "Reach the building and unlock its entrance.", count, total);
             return new(site, Status.Locked, task, count, total);
@@ -196,6 +218,7 @@ namespace ShiftFour
         private void LateUpdate()
         {
             if (player == null || player.MenuBlocksInput) return;
+            AdvanceNotice(Time.unscaledDeltaTime);
             var next = ReadObjective(CurrentSite);
             if (lastObjective.Instruction != null && (lastObjective.Site != next.Site || lastObjective.Status != next.Status ||
                 lastObjective.Count != next.Count || lastObjective.Instruction != next.Instruction))
@@ -208,7 +231,7 @@ namespace ShiftFour
             get
             {
                 if (extraction != null && !string.IsNullOrEmpty(extraction.Notice)) return extraction.Notice;
-                if (server != null && !string.IsNullOrEmpty(server.Notice)) return server.Notice;
+                if (server != null && !server.HasWarning && !string.IsNullOrEmpty(server.Notice)) return server.Notice;
                 if (control != null && !string.IsNullOrEmpty(control.Notice)) return control.Notice;
                 if (storage != null && !string.IsNullOrEmpty(storage.Notice)) return storage.Notice;
                 if (checkpoint != null && !string.IsNullOrEmpty(checkpoint.Notice)) return checkpoint.Notice;

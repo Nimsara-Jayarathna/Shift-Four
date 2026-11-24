@@ -9,7 +9,7 @@ namespace ShiftFour
     {
         internal OutdoorSettings Preferences { get; private set; }
         internal const string ScenePath = "Assets/Scenes/OpenWorldPrototype.unity";
-        public enum ScreenState { Title, Playing, Paused, Settings, Dying, GameOver, Victory, Loading, Map, Missions }
+        public enum ScreenState { Title, Playing, Paused, Settings, Dying, GameOver, Victory, Loading, Map, Missions, Ending }
         public ScreenState Screen { get; private set; } = ScreenState.Title;
         private ScreenState settingsParent;
         internal PrototypePlayerFeedback Feedback { get; private set; }
@@ -24,11 +24,13 @@ namespace ShiftFour
         internal string ActiveTime { get; private set; }
         internal readonly string[] BuildingResults = new string[4];
         internal bool ShowingResult => Screen == ScreenState.GameOver || Screen == ScreenState.Victory;
+        private OpenWorldEndingPresentation ending;
+        internal float EndingTime => ending?.Elapsed ?? 0f;
         private Camera view;
         private Transform overviewBuilding;
         private readonly OutdoorMenuView panel = new OutdoorMenuView();
         private float opacity, previousScale;
-        private bool previousAudioPause, ownsClock, closing, overview;
+        private bool previousAudioPause, ownsClock, closing, overview, waitForSkipRelease;
         private int savedMask, actionFrame;
         private Quaternion savedRotation;
         private static bool startReloadedMission;
@@ -82,9 +84,11 @@ namespace ShiftFour
             if (next != null) next.Extracted += OnExtracted;
 
             // The generator also supports deliberately replacing a finished layout in Play Mode.
-            if (Screen == ScreenState.Victory && next != null && !next.Escaped && health.IsAlive)
+            if ((Screen == ScreenState.Victory || Screen == ScreenState.Ending) && health.IsAlive && (next == null || !next.Escaped))
             {
+                ReleaseEnding();
                 RestoreClock();
+                player.ApplyCameraPose();
                 elapsed = 0;
                 player.MenuBlocksInput = false;
                 Change(ScreenState.Playing);
@@ -94,10 +98,40 @@ namespace ShiftFour
 
         private void OnPlayerDied(Health _)
         {
+            if (Screen == ScreenState.Ending || extraction != null && extraction.Escaped) return;
             death = player.GetComponent<PlayerDeathPresentation>();
             BeginResult(ScreenState.Dying);
         }
-        private void OnExtracted() => BeginResult(ScreenState.Victory);
+        private void OnExtracted()
+        {
+            if (!isActiveAndEnabled || Screen != ScreenState.Playing || view == null || extraction.Gate == null)
+            {
+                extraction.Gate?.SetOpening(1f);
+                BeginResult(ScreenState.Victory);
+                return;
+            }
+            BeginResult(ScreenState.Ending);
+            Freeze();
+            SetCursor(true);
+            ending = new OpenWorldEndingPresentation(view, player, extraction.Gate, Preferences.Applied);
+        }
+
+        private void ReleaseEnding()
+        {
+            ending?.Dispose();
+            ending = null;
+        }
+
+        internal void FinishEnding()
+        {
+            if (Screen != ScreenState.Ending) return;
+            ReleaseEnding();
+            RestoreClock();
+            Change(ScreenState.Victory);
+            waitForSkipRelease = Input.GetKey(KeyCode.Space);
+            Freeze();
+            opacity = 0f;
+        }
 
         private void BeginResult(ScreenState state)
         {
@@ -179,6 +213,12 @@ namespace ShiftFour
         private void Update()
         {
             if (player == null || Screen == ScreenState.Loading || Screen == ScreenState.Dying) return;
+            if (Screen == ScreenState.Ending)
+            {
+                if (Input.GetKeyDown(KeyCode.Space) || ending == null || ending.Advance(Time.unscaledDeltaTime))
+                    FinishEnding();
+                return;
+            }
             if (Screen == ScreenState.Playing)
             {
                 if (Input.GetKeyDown(KeyCode.Escape)) Pause();
@@ -186,6 +226,7 @@ namespace ShiftFour
                 else if (Input.GetKeyDown(KeyCode.Tab)) OpenMissions();
                 return;
             }
+            if (waitForSkipRelease && !Input.GetKey(KeyCode.Space)) waitForSkipRelease = false;
             opacity = Mathf.MoveTowards(opacity, closing ? 0f : 1f, Time.unscaledDeltaTime * 6f);
             if (closing)
             {
@@ -315,11 +356,22 @@ namespace ShiftFour
         {
             if (player == null || Screen == ScreenState.Dying) return;
             if (Screen == ScreenState.Playing && (Feedback == null || player.MenuBlocksInput || Event.current.type != EventType.Repaint)) return;
-            panel.Draw(this, Screen == ScreenState.Playing ? 1f : opacity, closing || Screen == ScreenState.Loading);
+            panel.Draw(this, Screen == ScreenState.Playing ? 1f : opacity, closing || waitForSkipRelease || Screen == ScreenState.Loading);
+        }
+
+        private void OnEnable()
+        {
+            if (player != null && ShowingResult && !ownsClock) Freeze();
         }
 
         private void OnDisable()
         {
+            if (Screen == ScreenState.Ending)
+            {
+                ReleaseEnding();
+                Change(ScreenState.Victory);
+                opacity = 0f;
+            }
             RestoreClock();
             if (player != null)
             {

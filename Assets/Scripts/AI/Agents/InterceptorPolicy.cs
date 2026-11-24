@@ -57,6 +57,8 @@ namespace ShiftFour
         public Vector3[] PlayerRoute, DroneRoute;
     }
 
+    public enum InterceptorRejection { Blocked, CoolingDown, ArrivalWindow, Heading, Confidence }
+
     // This core knows only explicitly supplied sightings, world routes and the drone's own state.
     // The invisible-position argument is deliberately ignored, even if callers supply live data.
     public sealed class InterceptorPolicy
@@ -64,7 +66,12 @@ namespace ShiftFour
         public readonly InterceptorSettings Settings;
         private readonly List<InterceptorObservation> history = new List<InterceptorObservation>();
         private readonly List<InterceptorCandidate> candidates = new List<InterceptorCandidate>();
-        private readonly Dictionary<int, Vector2> failed = new Dictionary<int, Vector2>();
+        private readonly Dictionary<Vector3, Vector2> failed = new Dictionary<Vector3, Vector2>();
+        private readonly List<Vector3> expiredFailures = new();
+        private readonly List<(Vector3 Position, InterceptorRejection Reason)> rejected = new();
+        public IReadOnlyList<(Vector3 Position, InterceptorRejection Reason)> Rejected => rejected;
+        public Vector3 EstimatedVelocity => velocity;
+        public InterceptorCandidate SelectedCandidate => selected;
         private readonly HashSet<int> searched = new HashSet<int>();
         private int searchNode = -1;
         private readonly List<Vector3> searchPoints = new List<Vector3>();
@@ -234,6 +241,14 @@ namespace ShiftFour
             while (history.Count > 0 && now - history[0].Time > Settings.historySeconds) history.RemoveAt(0);
             Confidence = age >= Settings.observationExpiry ? 0f : quality * Mathf.Exp(-age * Settings.uncertaintyGrowth);
             candidates.Clear();
+            rejected.Clear();
+            expiredFailures.Clear();
+            foreach (var failure in failed)
+            {
+                if (now >= failure.Value.x && LastObservedAt > failure.Value.y) expiredFailures.Add(failure.Key);
+                else rejected.Add((failure.Key, InterceptorRejection.CoolingDown));
+            }
+            foreach (var position in expiredFailures) failed.Remove(position);
             bool graphChanged = version >= 0 && graphVersion != version;
             if (graphChanged)
             {
@@ -244,17 +259,23 @@ namespace ShiftFour
             if (selected != null)
             {
                 Vector3[] route = findRoute(drone, selected.Position);
-                if (!ValidRoute(route)) invalid = "Selected junction unreachable";
-                else if (!visible && Flat(drone - selected.Position).magnitude <= Settings.arrivalRadius &&
-                    now >= predictionDeadline) invalid = "Interception reached but player absent";
+                bool blocked = !ValidRoute(route);
+                if (blocked) invalid = "Selected junction unreachable";
+                else if (!visible && now >= predictionDeadline)
+                    invalid = Flat(drone - selected.Position).magnitude <= Settings.arrivalRadius
+                        ? "Interception reached but player absent" : "Predicted arrival window missed";
                 else if (now > predictionDeadline + Settings.arrivalSlack) invalid = "Predicted arrival window missed";
                 if (invalid != null)
                 {
                     if (invalid.Contains("absent") || invalid.Contains("missed"))
                     {
-                        failed[selected.Node] = new Vector2(now + Settings.failedCandidateCooldown, LastObservedAt);
+                        failed[selected.Position] = new Vector2(now + Settings.failedCandidateCooldown, LastObservedAt);
                         FailedAttempts++;
                     }
+                    else if (blocked && !graphChanged)
+                        failed[selected.Position] = new Vector2(now + Settings.failedCandidateCooldown, float.NegativeInfinity);
+                    rejected.Add((selected.Position, blocked ? InterceptorRejection.Blocked :
+                        invalid.Contains("absent") || invalid.Contains("missed") ? InterceptorRejection.ArrivalWindow : InterceptorRejection.Heading));
                     selected = null; Replans++; State = InterceptorState.Replan; Reason = invalid;
                 }
             }
@@ -278,7 +299,15 @@ namespace ShiftFour
                 State = selected == null ? InterceptorState.PredictMovement : State;
                 for (int i = 0; i < junctions.Count; i++)
                 {
-                    if (failed.TryGetValue(i, out Vector2 block) && (now < block.x || LastObservedAt <= block.y)) continue;
+                    // Lose sight and we may finish a justified interception. We cannot pick a
+                    // different junction until we observe the player again.
+                    if (!visible && (selected == null || selected.Position != junctions[i])) continue;
+                    if (failed.TryGetValue(junctions[i], out Vector2 block))
+                    {
+                        if ((!graphChanged && now < block.x) || LastObservedAt <= block.y)
+                            continue;
+                        failed.Remove(junctions[i]);
+                    }
                     InterceptorCandidate candidate = Evaluate(i, junctions[i], drone, droneSpeed, age, findRoute);
                     if (candidate == null) continue;
                     candidates.Add(candidate);
@@ -354,22 +383,31 @@ namespace ShiftFour
         private InterceptorCandidate Evaluate(int node, Vector3 point, Vector3 drone, float speed, float age,
             Func<Vector3, Vector3, Vector3[]> findRoute)
         {
-            Vector3[] playerPath = (playerRoutes ?? findRoute)(LastObserved, point), dronePath = findRoute(drone, point);
-            if (!ValidRoute(playerPath) || !ValidRoute(dronePath) || speed <= 0f) return null;
-            float length = Length(playerPath), droneLength = Length(dronePath);
+            Vector3 offset = Flat(point - LastObserved);
+            float forward = Vector3.Dot(offset, velocity.normalized);
+            if (forward < 1f) return Reject(point, InterceptorRejection.Heading);
+            float direct = offset.magnitude;
+            if (direct > velocity.magnitude * Settings.predictionHorizon)
+                return Reject(point, InterceptorRejection.ArrivalWindow);
+            Vector3[] playerPath = (playerRoutes ?? findRoute)(LastObserved, point);
+            if (!ValidRoute(playerPath) || speed <= 0f) return Reject(point, InterceptorRejection.Blocked);
+            float length = Length(playerPath);
             float playerTime = length / Mathf.Max(.1f, velocity.magnitude) - age;
-            float droneTime = motionTiming ? EstimateRouteSeconds(dronePath, speed, droneVelocity, droneAcceleration) : droneLength / speed;
+            if (playerTime <= 0f || age + playerTime > Settings.predictionHorizon)
+                return Reject(point, InterceptorRejection.ArrivalWindow);
             // A route can curve around cover, but its initial leg must agree with observed motion.
             Vector3 first = Vector3.zero;
             for (int i = 1; i < playerPath.Length && first.sqrMagnitude < .01f; i++) first = Flat(playerPath[i] - playerPath[0]);
             float alignment = Vector3.Dot(first.normalized, velocity.normalized);
-            float forward = Vector3.Dot(Flat(point - LastObserved), velocity.normalized);
-            if (alignment < .35f || forward < 1f || playerTime <= 0f ||
-                age + playerTime > Settings.predictionHorizon || droneTime > playerTime + Settings.arrivalSlack) return null;
-            float direct = Flat(point - LastObserved).magnitude;
+            if (alignment < .35f) return Reject(point, InterceptorRejection.Heading);
             float positioning = Mathf.Clamp01(direct / Mathf.Max(.1f, length)) * alignment;
             float confidence = Confidence * positioning / (1f + .12f * playerTime * Settings.uncertaintyGrowth);
-            if (confidence < Settings.minimumConfidence) return null;
+            if (confidence < Settings.minimumConfidence) return Reject(point, InterceptorRejection.Confidence);
+            Vector3[] dronePath = findRoute(drone, point);
+            if (!ValidRoute(dronePath)) return Reject(point, InterceptorRejection.Blocked);
+            float droneTime = motionTiming ? EstimateRouteSeconds(dronePath, speed, droneVelocity, droneAcceleration) : Length(dronePath) / speed;
+            if (!FiniteNumber(droneTime) || droneTime > playerTime + Settings.arrivalSlack)
+                return Reject(point, InterceptorRejection.ArrivalWindow);
             var c = new InterceptorCandidate { Node = node, Position = point, DroneArrival = droneTime,
                 PlayerArrival = playerTime, Confidence = confidence, PlayerRoute = playerPath, DroneRoute = dronePath,
                 Timing = Mathf.Clamp01((playerTime - droneTime + Settings.arrivalSlack) / Mathf.Max(.1f, playerTime)),
@@ -378,6 +416,12 @@ namespace ShiftFour
             c.Score = Settings.timingWeight * c.Timing + Settings.forwardWeight * c.Forward +
                 Settings.positioningWeight * c.Positioning + Settings.confidenceWeight * c.Confidence + Settings.stabilityWeight * c.Stability;
             return c;
+        }
+
+        private InterceptorCandidate Reject(Vector3 position, InterceptorRejection reason)
+        {
+            rejected.Add((position, reason));
+            return null;
         }
 
         public static bool ValidRoute(Vector3[] route)

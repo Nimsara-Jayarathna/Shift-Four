@@ -19,6 +19,7 @@ namespace ShiftFour
         private DroneMotor motor;
         private CapsuleCollider hitbox;
         private Collider blocker;
+        private Collider detourBlocker;
         private readonly Collider[] overlaps = new Collider[32];
         private readonly RaycastHit[] sweepHits = new RaycastHit[32];
         private Vector3 avoidanceHeading;
@@ -28,6 +29,9 @@ namespace ShiftFour
         private float flightOffset;
         private static readonly float[] AvoidanceAngles = { 30f, -30f, 60f, -60f, 90f, -90f, 120f, -120f };
         public bool MotionBlocked { get; private set; }
+        internal Collider BlockingCollider => blocker != null ? blocker : detouring ? detourBlocker : null;
+        internal bool BlockedByActor => blocker != null &&
+            (blocker is CharacterController || blocker.GetComponentInParent<DroneBody>() != null);
         public float HorizontalRadius => Mathf.Max(envelopeExtents.x, envelopeExtents.z);
         public Vector3 EnvelopeCenter => envelopeCenter + Vector3.up * flightOffset;
         public Vector3 EnvelopeExtents => envelopeExtents;
@@ -101,6 +105,7 @@ namespace ShiftFour
             // raised wings cannot clear, without changing the graph route or crossing NavMesh edges.
             // Players, other drones and security doors are temporary holds, never detour shortcuts.
             if (!CanDetour(blocker)) return safe;
+            Collider obstacle = blocker;
             Vector3 forward = agent.steeringTarget - start;
             forward.y = 0f;
             if (forward.sqrMagnitude < .01f) return safe;
@@ -124,6 +129,7 @@ namespace ShiftFour
             if (best == Vector3.zero) return safe;
             avoidanceHeading = best;
             detourPoint = start + best * probeDistance;
+            detourBlocker = obstacle;
             detouring = true;
             return start + best * Mathf.Min(travel, probeDistance);
         }
@@ -131,7 +137,9 @@ namespace ShiftFour
         private static bool CanDetour(Collider obstacle)
             => obstacle != null && obstacle.GetComponentInParent<PlayerController>() == null &&
                 !(obstacle is CharacterController) && obstacle.GetComponentInParent<DroneBody>() == null &&
-                obstacle.GetComponentInParent<LabDoor>() == null;
+                obstacle.GetComponentInParent<LabDoor>() == null &&
+                obstacle.GetComponentInParent<BuildingAccessDoor>() == null &&
+                obstacle.GetComponentInParent<CheckpointAccessDoor>() == null;
 
         private void LateUpdate()
         {
@@ -169,7 +177,11 @@ namespace ShiftFour
                 else clearanceSpeed = agent.velocity.magnitude;
             }
             // Never project/warp a collision correction across an edge or a carved gate.
-            if (agent.Raycast(safe, out _)) safe = start;
+            if (agent.Raycast(safe, out _))
+            {
+                safe = start;
+                MotionBlocked = true;
+            }
             if (!safe.Equals(start)) transform.position = safe;
             agent.nextPosition = safe;
             if (MotionBlocked) agent.velocity = Vector3.zero;

@@ -190,6 +190,13 @@ namespace ShiftFour
         private void Update()
         {
             if (!Alive || player == null || player.MenuBlocksInput) return;
+            // Decision and navigation state are initialized for the lifetime of a play session.
+            if (Awareness == null || motor == null)
+            {
+                WeaponAimPoint = null;
+                if (motor != null) motor.Stop();
+                return;
+            }
             var session = outdoorPatrol == null ? GameSession.Instance : null;
             if (session != null && !session.CanPlay) return;
             if (playerHealth == null || !playerHealth.IsAlive || (session != null && session.Ended))

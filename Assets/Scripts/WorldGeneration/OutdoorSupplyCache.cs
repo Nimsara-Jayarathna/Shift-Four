@@ -21,6 +21,7 @@ namespace ShiftFour
         private float noticeUntil;
         private const float IdleBeaconIntensity = 0.85f;
 
+        internal event System.Action Discovered;
         internal bool IsDiscovered { get; private set; }
         internal string Objective => IsDiscovered ? "Reach Checkpoint" : "Find Supply Station";
         internal string Notice => IsDiscovered && Time.unscaledTime < noticeUntil ? AcquiredMessage : string.Empty;
@@ -180,6 +181,7 @@ namespace ShiftFour
             sealedStatus.SetActive(false);
             discoveredStatus.SetActive(true);
             StartCoroutine(ShowOpening());
+            Discovered?.Invoke();
         }
 
         private void OnEnable()

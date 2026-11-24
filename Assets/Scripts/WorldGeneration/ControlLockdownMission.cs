@@ -27,13 +27,18 @@ namespace ShiftFour
         internal int TotalSwitches => SwitchCount;
         public bool IsComplete { get; private set; }
         internal event System.Action<ControlLockdownMission> Completed;
+        internal event System.Action<LockdownSecuritySwitch> SwitchActivated;
+        internal const float VerificationDuration = 1.2f;
+        private float restoredAt;
+        private bool lightingSettled;
+        internal float Verification => IsComplete ? Mathf.Clamp01((Time.time - restoredAt) / VerificationDuration) : 0f;
         private bool IsReady => activated == SwitchCount;
         public string SwitchProgress => $"Disable Security Switches ({activated}/{SwitchCount})";
         public string Objective => IsComplete ? CompletionMessage :
             IsReady ? "Disable Emergency Lockdown" : SwitchProgress;
         public string Hint => IsComplete ? LockdownDisabled :
             IsReady ? SwitchProgress : "Find the three switches inside Control";
-        public string Prompt => IsComplete ? LockdownDisabled : "E: Use Lockdown Override";
+        public string Prompt => IsComplete ? LockdownDisabled : IsReady ? "E: Use Lockdown Override" : SwitchesRequired;
         public string Notice => Time.unscaledTime < deniedUntil ? SwitchesRequired : string.Empty;
 
         internal void Configure(LockdownSecuritySwitch[] roomSwitches, Renderer lamp, TextMesh display,
@@ -58,6 +63,7 @@ namespace ShiftFour
                 return;
             }
 
+            restoredAt = Time.time;
             IsComplete = true;
             deniedUntil = 0f;
             UpdateDisplay();
@@ -70,11 +76,14 @@ namespace ShiftFour
             if (!isActiveAndEnabled || IsReady || roomSwitch.IsActivated) return;
             roomSwitch.SetActivated(true);
             activated++;
+            UpdateDisplay();
             deniedUntil = 0f;
+            SwitchActivated?.Invoke(roomSwitch);
         }
 
         internal void ResetMission()
         {
+            lightingSettled = false;
             activated = 0;
             deniedUntil = 0f;
             IsComplete = false;
@@ -86,18 +95,28 @@ namespace ShiftFour
 
         private void UpdateDisplay()
         {
-            Color color = IsComplete ? DisabledColor : LockedColor;
+            Color color = IsComplete ? DisabledColor : IsReady ? Color.cyan : LockedColor;
             SetTint(indicator, color, ref properties);
             if (status != null)
             {
-                status.text = IsComplete ? LockdownDisabled + "\n" + CompletionMessage : "LOCKDOWN ACTIVE";
+                status.text = IsComplete ? LockdownDisabled + "\n" + CompletionMessage :
+                    $"SECURITY SUBSYSTEMS: {activated} / {SwitchCount}\n" +
+                    (IsReady ? "OVERRIDE AUTHORIZED\nE: DISABLE LOCKDOWN" : "LOCKDOWN ACTIVE\nOVERRIDE UNAVAILABLE");
                 SetTint(status.GetComponent<Renderer>(), color, ref properties);
             }
             if (warningIndicators != null)
-                foreach (var lamp in warningIndicators) SetTint(lamp, color, ref properties);
-            if (warningLights != null)
-                foreach (var light in warningLights)
-                    if (light != null) light.color = color;
+                foreach (var lamp in warningIndicators) SetTint(lamp, IsComplete ? DisabledColor : LockedColor, ref properties);
+        }
+
+        private void Update()
+        {
+            if (warningLights == null || lightingSettled || Time.timeScale == 0f) return;
+            float blend = Mathf.SmoothStep(0, 1, Verification);
+            Color tint = Color.Lerp(LockedColor, new Color(.22f, .85f, .65f), blend);
+            float strength = Mathf.Lerp(3.3f + .6f * Mathf.Sin(Time.time * 1.9f), 1.8f, blend);
+            lightingSettled = IsComplete && blend >= 1f;
+            foreach (var fixture in warningLights)
+                if (fixture != null) { fixture.color = tint; fixture.intensity = strength; }
         }
 
         internal static void SetTint(Renderer renderer, Color color, ref MaterialPropertyBlock block)

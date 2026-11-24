@@ -39,7 +39,7 @@ namespace ShiftFour
             }
         }
 
-        public string Prompt => opening || IsOpen ? Granted : unlockPrompt;
+        public string Prompt => opening || IsOpen ? Granted : HasKey ? unlockPrompt : KeyRequired;
 
         internal static void Build(Transform building, Site site, OutdoorPlayerEquipment owner, PrototypeMaterials materials, Font font)
         {

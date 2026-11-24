@@ -133,6 +133,7 @@ namespace ShiftFour
             Bank = Damp(Bank, bankTarget, 9f, dt);
             ShutdownBlend = Damp(ShutdownBlend, dead ? 1f : 0f, 5f, dt);
             Hover = Mathf.Sin(clock * 3f) * HoverAmplitude * (1f - ShutdownBlend);
+            if (Role == DroneFlightRole.Interceptor) Hover *= 1f - .85f * Mathf.Clamp01(speed);
             float target = dead ? 0f : .8f + Mathf.Clamp01(speed) * .2f + ForwardAcceleration * .06f + FireFlash * .12f;
             if (!dead && Role != DroneFlightRole.Default)
                 target = .66f + .36f * Mathf.Clamp01(speed) + .21f * ForwardAcceleration

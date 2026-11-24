@@ -96,7 +96,16 @@ namespace ShiftFour.Tests
                         Interact(reader);
                         Assert.That(signal.clip.name, Is.EqualTo("Reject"));
                         Interact(InRoom(hall, "SecurityAccessCard").Single());
+                        Assert.That(signal.clip.name, Is.EqualTo("Relay"));
                         Interact(reader);
+                        Assert.That(signal.clip.name, Is.EqualTo("Relay"));
+                        Assert.That((bool)reader.GetType().GetProperty("IsComplete").GetValue(reader), Is.True);
+                        Call(menu, "Pause");
+                        yield return new WaitForSecondsRealtime(1.4f);
+                        Assert.That(signal.clip.name, Is.EqualTo("Relay"));
+                        Call(menu, "Play");
+                        yield return new WaitUntil(() => !AudioListener.pause);
+                        yield return new WaitForSeconds(1.45f);
                         Assert.That(signal.clip.name, Is.EqualTo("Authenticate"));
                         Assert.That(Vector3.Distance(signal.transform.position, reader.transform.position), Is.LessThan(.001f));
                         Call(menu, "Pause");
@@ -125,6 +134,8 @@ namespace ShiftFour.Tests
                     else if (i == 1)
                     {
                         var terminals = InRoom(hall, "ServerTerminal").OrderBy(t => t.name).ToArray();
+                        Interact(terminals[0]);
+                        Assert.That(signal.clip.name, Is.EqualTo("Reject"));
                         foreach (int n in new[] { 1, 0, 2 })
                         {
                             Interact(terminals[n]);
@@ -136,8 +147,15 @@ namespace ShiftFour.Tests
                     {
                         yield return new WaitForSeconds(3.3f);
                         Assert.That(signal.clip.name, Is.EqualTo("Advisory"));
-                        foreach (var toggle in InRoom(hall, "LockdownSecuritySwitch")) Interact(toggle);
+                        int switched = 0;
+                        foreach (var toggle in InRoom(hall, "LockdownSecuritySwitch"))
+                        {
+                            Interact(toggle);
+                            Assert.That(signal.clip.name, Is.EqualTo(++switched == 3 ? "Authenticate" : "Relay"));
+                        }
                         Interact(InRoom(hall, "ControlLockdownMission").Single());
+                        Assert.That(signal.clip.name, Is.EqualTo("Relay"));
+                        yield return new WaitForSeconds(1.35f);
                         Assert.That(signal.clip.name, Is.EqualTo("Authenticate"));
                     }
                     else

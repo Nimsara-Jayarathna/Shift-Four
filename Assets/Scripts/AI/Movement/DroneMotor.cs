@@ -13,7 +13,7 @@ namespace ShiftFour
 
         private static readonly ProfilerMarker CombatGoalMarker = new ProfilerMarker("ShiftFour.GoToCombat");
         private enum MovementState { NoGoal, Pending, Following, Arrived, Blocked, Stopped }
-        private enum BlockReason { None, NoGraphRoute, Navigation, Unavailable }
+        private enum BlockReason { None, NoGraphRoute, Navigation, Unavailable, PhysicalObstruction }
 
         private const float IntermediateDistance = 0.25f;
         private const float ArrivalSlack = 0.05f;
@@ -22,6 +22,9 @@ namespace ShiftFour
         private const float PlanInterval = 0.3f;
         private const float PendingTimeout = 3f;
         private const float ProgressTimeout = 2f;
+        private const float ActorHoldTimeout = 7f;
+        private const float PhysicalProgressThreshold = .3f;
+        private const float ObstacleMoveTolerance = .5f;
         private const int MaxRetries = 2;
         private static readonly float[] ApproachAngles = { 0f, 45f, -45f, 90f, -90f };
         [SerializeField] private Transform visual;
@@ -30,7 +33,7 @@ namespace ShiftFour
         private NavMeshAgent agent;
         private WaypointGraph graph;
         private List<Vector3> route = new List<Vector3>();
-        private int step;
+        private int step, nativeStep;
         private int graphVersion = -1;
         private Vector3 goal;
         private float bobClock;
@@ -60,6 +63,12 @@ namespace ShiftFour
         private DroneMovementSpeeds movementSpeeds;
         private Vector3 previousPosition;
         private bool sampledMotion;
+        private Collider stalledBy;
+        private Bounds stalledBounds;
+        private bool watchingObstruction;
+        private Vector3? invalidWaypoint;
+        private int routeQueries;
+        private WaypointGraph.SearchTrace searchTrace;
 
         public bool HasMovementProfile => movementSpeeds != null;
         public DroneMovementMode MovementMode => movementSpeeds?.Mode ?? DroneMovementMode.Patrol;
@@ -70,6 +79,25 @@ namespace ShiftFour
         public float AnimationReferenceSpeed => movementSpeeds?.AnimationReference ?? Mathf.Max(.1f, CruiseSpeed);
         public Vector3 ActualVelocity { get; private set; }
         public float ActualSpeed => ActualVelocity.magnitude;
+
+        internal IReadOnlyList<Vector3> RouteForDiagnostics => route;
+        internal int RouteStepForDiagnostics => step;
+        internal string MovementStatus => state.ToString();
+        internal string BlockedReason => blockedBy.ToString();
+        internal string PathStatus => !NavigationReady ? "Unavailable" : agent.pathPending ? "Pending" :
+            HasRoute ? agent.pathStatus.ToString() : "No path";
+        internal int PlannedGraphVersion => graphVersion;
+        internal int ReplanCount => Mathf.Max(0, routeQueries - 1);
+        internal Vector3? CurrentWaypoint => HasRoute ? route[step] : null;
+        internal Vector3? FinalDestination => hasGoal ? goal : null;
+        internal Vector3? InvalidWaypoint => state == MovementState.Blocked ? invalidWaypoint : null;
+        internal WaypointGraph.SearchTrace SearchEvidence => searchTrace;
+
+        internal void RequestSearchEvidence(bool enabled)
+        {
+            if (enabled) searchTrace ??= new WaypointGraph.SearchTrace();
+            else searchTrace = null;
+        }
 
         // Bind once at startup. Reapplying health/profile data must not reset motion mid-route.
         public bool InitializeMovement(DroneDifficultySettings settings)
@@ -141,6 +169,7 @@ namespace ShiftFour
                 retryCount = 0;
                 retryGraphFailure = false;
                 retryAt = float.PositiveInfinity;
+                ClearObstructionWatch();
             }
             ResolveGraph();
             CheckInvalidation();
@@ -229,15 +258,14 @@ namespace ShiftFour
                 else UpdateRoute();
             }
             if (!NavigationReady) return;
-            Vector3 velocity = agent.velocity;
-            velocity.y = 0f;
-            if (velocity.sqrMagnitude < 0.15f * 0.15f) turning = false;
-            else if (velocity.sqrMagnitude > 0.3f * 0.3f) turning = true;
+            // Face the last accepted displacement. Intentional aiming still takes priority.
+            if (ActualSpeed < .15f) turning = false;
+            else if (ActualSpeed > .3f) turning = true;
             if (facingTarget.HasValue)
                 transform.rotation = TurnTowards(transform.rotation, facingTarget.Value - transform.position,
                     turnSpeed * 1.4f, agent.angularSpeed, Time.deltaTime);
-            else if (turning)
-                transform.rotation = TurnTowards(transform.rotation, velocity, turnSpeed, agent.angularSpeed, Time.deltaTime);
+            else if (turning && HasRoute)
+                transform.rotation = TurnTowards(transform.rotation, ActualVelocity, turnSpeed, agent.angularSpeed, Time.deltaTime);
             CacheVisualPosition();
             if (visual != null && visualOwner == null)
             {
@@ -271,9 +299,17 @@ namespace ShiftFour
         {
             heading.y = 0f;
             if (heading.sqrMagnitude < 0.0001f) return current;
+            Vector3 facing = current * Vector3.forward;
+            float currentYaw = Mathf.Atan2(facing.x, facing.z) * Mathf.Rad2Deg;
+            float targetYaw = Mathf.Atan2(heading.x, heading.z) * Mathf.Rad2Deg;
             float blend = 1f - Mathf.Exp(-Mathf.Max(0f, responsiveness) * deltaTime);
-            Quaternion target = Quaternion.Slerp(current, Quaternion.LookRotation(heading), blend);
-            return Quaternion.RotateTowards(current, target, Mathf.Max(0f, degreesPerSecond) * deltaTime);
+            float limit = Mathf.Max(0f, degreesPerSecond) * deltaTime;
+            // Leave a small margin for float rounding when comparing adjacent orientations.
+            limit -= Mathf.Min(limit * .1f, .01f);
+            float turn = Mathf.Clamp(Mathf.DeltaAngle(currentYaw, targetYaw) * blend, -limit, limit);
+            // Cap the actual yaw increment directly. Two successive quaternion blends
+            // can lose precision when both angles are tiny.
+            return turn == 0f ? current : Quaternion.Normalize(Quaternion.AngleAxis(turn, Vector3.up) * current);
         }
 
         private bool NavigationReady => agent != null && agent.isActiveAndEnabled && agent.isOnNavMesh;
@@ -295,6 +331,7 @@ namespace ShiftFour
                 retryGraphFailure = graphVersion >= 0;
                 graphVersion = graph.Version;
                 retryCount = 0;
+                ClearObstructionWatch();
                 if (state != MovementState.Arrived)
                 {
                     replanRequested = true;
@@ -314,7 +351,15 @@ namespace ShiftFour
                     retryGraphFailure = true;
                 }
             }
-            if (state == MovementState.Blocked && blockedBy == BlockReason.Navigation &&
+            if (state == MovementState.Blocked && blockedBy == BlockReason.PhysicalObstruction &&
+                retryCount >= MaxRetries && ObstructionChanged())
+            {
+                retryCount = 0;
+                ClearObstructionWatch();
+                replanRequested = true;
+            }
+            if (state == MovementState.Blocked &&
+                (blockedBy == BlockReason.Navigation || blockedBy == BlockReason.PhysicalObstruction) &&
                 retryCount < MaxRetries && Time.time >= retryAt)
             {
                 retryCount++;
@@ -334,7 +379,8 @@ namespace ShiftFour
             }
             replanRequested = false;
             graphVersion = graph.Version;
-            route = graph.FindRoute(transform.position, goal);
+            routeQueries++;
+            route = graph.FindRouteWithTrace(transform.position, goal, searchTrace);
             step = 0;
             // A gate version can arrive before carving settles. Newer graph implementations
             // may report this as an empty route; allow the same bounded recovery window.
@@ -363,25 +409,41 @@ namespace ShiftFour
             if (float.IsInfinity(remaining) || float.IsNaN(remaining))
             {
                 state = MovementState.Pending;
-                if (body != null && body.MotionBlocked && agent.hasPath) pendingSince = Time.time;
-                if (Time.time - pendingSince > PendingTimeout) Block(BlockReason.Navigation);
+                float timeout = body != null && body.BlockedByActor ? ActorHoldTimeout : PendingTimeout;
+                if (Time.time - pendingSince > timeout) BlockForStall();
                 return;
             }
             state = MovementState.Following;
-            bool final = step == route.Count - 1;
+            while (step < nativeStep && NearbyPointIsClear(route[step], IntermediateDistance + ArrivalSlack))
+                step++;
+            if (step < nativeStep && Vector3.Dot(transform.position - route[step],
+                    (route[nativeStep] - route[step]).normalized) > IntermediateDistance + ArrivalSlack)
+            {
+                // A local detour left the straight corridor before reaching a waypoint.
+                RequestLeg(step);
+                return;
+            }
+            bool final = nativeStep == route.Count - 1;
             float distance = final ? finalStoppingDistance : IntermediateDistance;
-            if (!agent.hasPath && !NearbyPointIsClear(route[step], distance + ArrivalSlack))
+            if (!agent.hasPath && !NearbyPointIsClear(route[nativeStep], distance + ArrivalSlack))
             { Block(BlockReason.Navigation); return; }
             if (!CanArrive(false, agent.pathStatus, remaining, distance, agent.velocity.sqrMagnitude, final))
             {
-                if (remaining < progressRemaining - 0.1f)
+                float progressThreshold = body != null && body.MotionBlocked ? PhysicalProgressThreshold : .1f;
+                if (remaining < progressRemaining - progressThreshold)
                 {
                     progressRemaining = remaining;
                     progressAt = Time.time;
                 }
-                // Physics clearance can temporarily hold a valid route. Keep it resumable.
-                else if (body != null && body.MotionBlocked) progressAt = Time.time;
-                else if (Time.time - progressAt > ProgressTimeout) Block(BlockReason.Navigation);
+                else if (Time.time - progressAt > (body != null && body.BlockedByActor ? ActorHoldTimeout : ProgressTimeout))
+                    BlockForStall();
+                return;
+            }
+            if (step != nativeStep)
+            {
+                // Native avoidance departed the straight corridor. Re-approach the
+                // unvisited waypoint rather than treating it as crossed.
+                RequestLeg(step);
                 return;
             }
             step++;
@@ -411,6 +473,10 @@ namespace ShiftFour
         private void Advance()
         {
             if (!NavigationReady) { Block(BlockReason.Unavailable); return; }
+            // The sampled NavMesh height can differ from an authored origin node.
+            // Consume a locally reachable stop that the body has already reached.
+            while (step < route.Count - 1 && NearbyPointIsClear(route[step], IntermediateDistance + ArrivalSlack))
+                step++;
             if (step >= route.Count)
             {
                 state = replanRequested ? MovementState.Pending : MovementState.Arrived;
@@ -418,17 +484,78 @@ namespace ShiftFour
                 agent.stoppingDistance = finalStoppingDistance;
                 return;
             }
-            agent.stoppingDistance = step == route.Count - 1 ? finalStoppingDistance : IntermediateDistance;
+            RequestLeg(EndOfStraightLeg());
+        }
+
+        private void RequestLeg(int end)
+        {
+            nativeStep = end;
+            agent.stoppingDistance = end == route.Count - 1 ? finalStoppingDistance : IntermediateDistance;
             agent.isStopped = false;
-            DestinationRequested(agent.SetDestination(route[step]));
+            DestinationRequested(agent.SetDestination(route[end]));
+        }
+
+        private int EndOfStraightLeg()
+        {
+            Vector3 origin = transform.position;
+            Vector3 forward = route[step] - origin;
+            forward.y = 0f;
+            if (forward.sqrMagnitude < .25f) return step;
+            forward.Normalize();
+            var filter = new NavMeshQueryFilter { agentTypeID = agent.agentTypeID, areaMask = agent.areaMask };
+            float brakingDistance = agent.acceleration > 0f
+                ? agent.speed * agent.speed / (2f * agent.acceleration) : float.PositiveInfinity;
+            int end = step;
+            while (end + 1 < route.Count)
+            {
+                Vector3 nextPoint = route[end + 1];
+                Vector3 leg = nextPoint - route[end];
+                Vector3 offset = nextPoint - origin;
+                offset.y = 0f;
+                float forwardDistance = Vector3.Dot(leg, forward);
+                float stopDistance = end + 1 == route.Count - 1 ? finalStoppingDistance : IntermediateDistance;
+                if (forwardDistance <= stopDistance + brakingDistance + IntermediateDistance ||
+                    Mathf.Abs(leg.y) > .1f || Vector3.Cross(offset, forward).sqrMagnitude > .01f * .01f ||
+                    agent.Raycast(nextPoint, out _) || NavMesh.Raycast(route[end], nextPoint, out _, filter))
+                    break;
+                end++;
+            }
+            return end;
+        }
+
+        private void BlockForStall()
+        {
+            if (body == null || !body.MotionBlocked && body.BlockingCollider == null)
+            {
+                Block(BlockReason.Navigation);
+                return;
+            }
+            stalledBy = body.BlockingCollider;
+            watchingObstruction = stalledBy != null;
+            if (watchingObstruction) stalledBounds = stalledBy.bounds;
+            Block(BlockReason.PhysicalObstruction);
+        }
+
+        private bool ObstructionChanged() => watchingObstruction &&
+            (stalledBy == null || !stalledBy.enabled || !stalledBy.gameObject.activeInHierarchy ||
+             (stalledBy.bounds.center - stalledBounds.center).sqrMagnitude >= ObstacleMoveTolerance * ObstacleMoveTolerance ||
+             (stalledBy.bounds.extents - stalledBounds.extents).sqrMagnitude >= ObstacleMoveTolerance * ObstacleMoveTolerance);
+
+        private void ClearObstructionWatch()
+        {
+            stalledBy = null;
+            watchingObstruction = false;
         }
 
         private void Block(BlockReason reason)
         {
+            if (HasRoute) invalidWaypoint = route[step];
+            else if (state != MovementState.Blocked) invalidWaypoint = hasGoal ? goal : null;
             state = MovementState.Blocked;
             blockedBy = reason;
-            if (reason == BlockReason.Navigation) retryGraphFailure = true;
-            retryAt = reason == BlockReason.Navigation && retryCount < MaxRetries
+            bool retriable = reason == BlockReason.Navigation || reason == BlockReason.PhysicalObstruction;
+            if (retriable) retryGraphFailure = true;
+            retryAt = retriable && retryCount < MaxRetries
                 ? Time.time + 0.5f * (retryCount + 1) : float.PositiveInfinity;
             route.Clear();
             step = 0;
@@ -438,7 +565,7 @@ namespace ShiftFour
                 agent.velocity = Vector3.zero;
                 agent.ResetPath();
                 agent.stoppingDistance = finalStoppingDistance;
-            }
+                }
         }
 
         public void Stop()
@@ -456,7 +583,7 @@ namespace ShiftFour
                 agent.velocity = Vector3.zero;
                 agent.ResetPath();
                 agent.stoppingDistance = finalStoppingDistance;
-            }
+                }
             enabled = false;
         }
     }

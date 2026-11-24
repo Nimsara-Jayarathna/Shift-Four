@@ -51,16 +51,27 @@ namespace ShiftFour
             GUI.depth = -100;
             alpha = opacity;
             GUI.color = new Color(1, 1, 1, alpha);
-            if (menu.Screen == OutdoorMissionMenu.ScreenState.Playing || menu.ViewingBriefing)
+            if (menu.Screen == OutdoorMissionMenu.ScreenState.Ending || menu.Screen == OutdoorMissionMenu.ScreenState.Playing || menu.ViewingBriefing)
             {
-                if (menu.ViewingBriefing) DrawBriefing(menu, w, h, busy);
-                else DrawObjective(menu.Feedback);
+                if (menu.Screen == OutdoorMissionMenu.ScreenState.Ending) DrawEnding(menu.EndingTime, w, h);
+                else if (menu.ViewingBriefing) DrawBriefing(menu, w, h, busy);
+                else
+                {
+                    DrawObjective(menu.Feedback);
+                    DrawMissionNotice(menu.Feedback, w);
+                }
                 GUI.matrix = matrix;
                 GUI.color = color;
                 GUI.depth = depth;
                 return;
             }
-            GUI.DrawTexture(new Rect(0, 0, w, h), shade);
+            if (menu.Screen == OutdoorMissionMenu.ScreenState.Victory)
+            {
+                GUI.color = Color.black;
+                GUI.DrawTexture(new Rect(0, 0, w, h), Texture2D.whiteTexture);
+                GUI.color = Color.white;
+            }
+            else GUI.DrawTexture(new Rect(0, 0, w, h), shade);
             if (menu.Screen == OutdoorMissionMenu.ScreenState.Settings || menu.Screen == OutdoorMissionMenu.ScreenState.Loading)
             {
                 if (menu.Screen == OutdoorMissionMenu.ScreenState.Settings) DrawSettings(menu, w, h);
@@ -166,6 +177,20 @@ namespace ShiftFour
             else menu.Quit();
         }
 
+        private void DrawEnding(float time, float w, float h)
+        {
+            alpha = 1f;
+            float bar = 0.055f * h * Mathf.SmoothStep(0, 1, time / .45f);
+            Fill(new Rect(0, 0, w, bar), Color.black);
+            Fill(new Rect(0, h - bar, w, bar), Color.black);
+            alpha = Mathf.SmoothStep(0, 1, time / .25f) * (1f - Mathf.InverseLerp(1.65f, 2.15f, time));
+            Fill(new Rect(42, h - 113, 3, 39), Cyan);
+            Text(new Rect(57, h - 116, 420, 45), "EXTRACTION AUTHORIZED", 23, Paper, true);
+            alpha = 1f;
+            Text(new Rect(w - 168, h - 36, 145, 29), "SPACE TO SKIP", 15, Paper, false);
+            Fill(new Rect(0, 0, w, h), new Color(0, 0, 0, Mathf.SmoothStep(0, 1, time - 11f)));
+        }
+
         private void DrawReport(OutdoorMissionMenu menu, float x, float y, Color accent)
         {
             const float width = 416;
@@ -179,7 +204,7 @@ namespace ShiftFour
                 ResultRow(x, y + 110 + 37 * i, Buildings[i], menu.BuildingResults[i],
                     menu.BuildingResults[i] == "Complete" ? Cyan : Muted);
             Fill(new Rect(x, y + 263, width - 52, 1), Surface);
-            ResultRow(x, y + 274, "Extraction targets defeated", menu.TargetCount, Paper);
+            ResultRow(x, y + 274, "Security targets", menu.TargetCount, Paper);
             Text(new Rect(x, y + 310, width - 52, 22), "Scout  /  Guard  /  Flanker", 15, Muted, false);
             Fill(new Rect(x, y + 342, width - 52, 1), Surface);
             ResultRow(x, y + 354, "Active mission time", menu.ActiveTime, Paper);

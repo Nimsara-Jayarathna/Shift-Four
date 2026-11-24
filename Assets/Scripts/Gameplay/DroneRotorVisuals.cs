@@ -53,6 +53,15 @@ namespace ShiftFour
         private readonly List<Quaternion> pivotRest = new List<Quaternion>();
         private readonly List<TintSlot> tints = new List<TintSlot>();
         public DroneVisualState State => wreck != null ? wreck.State : dying ? DroneVisualState.CriticalFailure : pose.State;
+        private InterceptorAirframe airframe;
+        private InterceptorBrain interceptorBrain;
+        internal GameplayAudio AudioBus { private get; set; }
+        internal bool IsAirframeDetail(Transform part) => airframe != null && part.IsChildOf(airframe.Root);
+        private float yawSpeed, forwardAcceleration, lastDetailUpdate;
+        private Vector3 AppliedAngles => (transform.localRotation * Quaternion.Inverse(restRotation)).eulerAngles;
+        internal string AnimationReport => $"Flight {State}   |   Sensor {airframe?.SensorStatus}   |   Rotor {rotorRpm * pose.RotorSpeed:F0} rpm\n" +
+            $"Forward accel {forwardAcceleration:F1} m/s²   |   Yaw {yawSpeed:F0}°/s   |   Hover {pose.Hover*100:F1} cm\n" +
+            $"Pose pitch {Mathf.DeltaAngle(0, AppliedAngles.x):F1}° / bank {Mathf.DeltaAngle(0, AppliedAngles.z):F1}°   |   Hit {pose.HitFlash:P0}   |   Wreck {wreck?.State.ToString() ?? (dying ? "Critical" : "Live")}";
         public DroneWeaponEffects Effects => effects;
         public DroneWeaponMount WeaponMount { get; private set; }
         public DroneWreckMotion Wreck => wreck;
@@ -123,21 +132,46 @@ namespace ShiftFour
                         Original = original, Animated = animated });
                 }
             }
+            interceptorBrain = brain as InterceptorBrain;
+            if (interceptorBrain != null) airframe = new InterceptorAirframe(transform, pivots);
             effects = new DroneWeaponEffects(root);
         }
 
-        internal void ConfigureOutdoorFlight(Camera camera, int slot)
+        internal static DroneFlightRole Identify(DroneBrain source) => source switch
+        {
+            GuardBrain => DroneFlightRole.Guard,
+            ScoutBrain => DroneFlightRole.Scout,
+            FlankerBrain => DroneFlightRole.Flanker,
+            InterceptorBrain => DroneFlightRole.Interceptor,
+            _ => DroneFlightRole.Default
+        };
+
+        internal void ConfigureOutdoorFlight(Camera camera, int slot, Font font, Material lettering)
         {
             if (OutdoorFlight || root == null || root == transform) return;
-            flightRole = brain switch
-            {
-                GuardBrain => DroneFlightRole.Guard,
-                ScoutBrain => DroneFlightRole.Scout,
-                FlankerBrain => DroneFlightRole.Flanker,
-                InterceptorBrain => DroneFlightRole.Interceptor,
-                _ => DroneFlightRole.Default
-            };
+            flightRole = Identify(brain);
             if (!OutdoorFlight) return;
+            if (font != null && lettering != null)
+            {
+                // The imported fuselages have flat end plates. Clear their faces by 3 mm
+                // in model space. The Interceptor carries its stencil on the Phase C sensor brow.
+                (Vector3 at, float width, float height) = flightRole switch
+                {
+                    DroneFlightRole.Guard => (new Vector3(0, .09f, .703f), .70f, .12f),
+                    DroneFlightRole.Flanker => (new Vector3(0, .09f, .683f), .36f, .095f),
+                    DroneFlightRole.Scout => (new Vector3(0, .09f, .653f), .28f, .09f),
+                    _ => (new Vector3(0, .237f, .929f), .46f, .052f)
+                };
+                var stamp = PrototypeGeometry.Label(flightRole.ToString().ToUpperInvariant(), transform, at,
+                    .08f, font, width, height, lettering);
+                stamp.name = "Chassis stencil";
+                stamp.transform.localRotation = Quaternion.Euler(0, 180, 0);
+                var ink = new MaterialPropertyBlock();
+                var renderer = stamp.GetComponent<Renderer>();
+                renderer.GetPropertyBlock(ink);
+                ink.SetColor(BaseColor, new Color(.72f, .78f, .76f));
+                renderer.SetPropertyBlock(ink);
+            }
             viewer = camera != null ? camera.transform : null;
             nextDistantTint = Time.time + slot * .004f;
             pose.Role = flightRole;
@@ -193,7 +227,7 @@ namespace ShiftFour
             if (root == null || root == transform) return;
             effects?.Clear();
             if (dying) return; // Never move a falling/settled wreck back to its flying rest pose.
-            if (OutdoorFlight) WeaponMount.SetRecoil(0f);
+            if (OutdoorFlight) WeaponMount?.SetRecoil(0f);
             transform.SetLocalPositionAndRotation(restPosition, restRotation);
             for (int i = 0; i < pivots.Count; i++) if (pivots[i] != null) pivots[i].localRotation = pivotRest[i];
             foreach (TintSlot tint in tints)
@@ -202,9 +236,9 @@ namespace ShiftFour
 
         private void OnFired(DroneBrain source)
         {
-            if (dying || (health != null && !health.IsAlive)) return;
+            if (effects == null || dying || (health != null && !health.IsAlive)) return;
             pose.Fire();
-            if (OutdoorFlight) WeaponMount.SetRecoil(1f);
+            if (OutdoorFlight) WeaponMount?.SetRecoil(1f);
             effects.Fire(source.LastShotOrigin, source.LastShotHit, muzzleFlashDuration, tracerDuration);
         }
         private void OnDamaged(DamageRecord hit) { if (hit.Fatal) BeginDeath(); else pose.Hit(false); }
@@ -214,14 +248,24 @@ namespace ShiftFour
             if (dying) return;
             dying = true; DestructionCount++;
             pose.Shutdown(); effects?.CancelShot();
+            if (airframe != null)
+            {
+                effects?.Impact(transform.position + transform.up * .15f, transform.up);
+                AudioBus?.InterceptorFailure(transform.position);
+            }
         }
 
         public void GroundImpact(Vector3 point, Vector3 normal)
-        { if (isActiveAndEnabled) effects?.Impact(point, normal); }
+        { if (isActiveAndEnabled)
+            {
+                effects?.Impact(point, normal);
+                if (airframe != null) AudioBus?.InterceptorImpact(point);
+            } }
 
         public void WreckSettled()
         {
             pose.StopRotors();
+            airframe?.Stop();
             if (!OutdoorFlight) return;
             foreach (TintSlot tint in tints)
             {
@@ -232,13 +276,13 @@ namespace ShiftFour
             enabled = false;
         }
 
-        private void OnDestroy() { effects?.Dispose(); WeaponMount?.Dispose(); }
+        private void OnDestroy() { effects?.Dispose(); WeaponMount?.Dispose(); airframe?.Dispose(); }
 
         private void LateUpdate()
         {
             using var sample = AnimationMarker.Auto();
             float dt = Time.deltaTime;
-            if (dt <= 0f || root == null) return;
+            if (dt <= 0f || root == null || (airframe != null && Time.timeScale == 0f)) return;
             Vector3 position = root.position;
             float yaw = root.eulerAngles.y;
             Vector3 velocity = sampled ? (position - previousPosition) / dt : Vector3.zero;
@@ -261,6 +305,8 @@ namespace ShiftFour
             previousMovementVelocity = velocity;
             sampledAcceleration = !teleported;
             pose.SetAcceleration(acceleration.z);
+            forwardAcceleration = acceleration.z * speed;
+            yawSpeed = yawRate;
             var awareness = brain != null && brain.Awareness != null && brain.Awareness.IsEnabled ?
                 brain.Awareness.State : DroneAwarenessState.Patrol;
             bool preparing = OutdoorFlight && brain is FlankerBrain flanker && flanker.IsAmbushWarning;
@@ -272,7 +318,11 @@ namespace ShiftFour
                     _ => DroneAwarenessState.Patrol
                 };
             bool response = OutdoorFlight && brain is InterceptorBrain interceptor && interceptor.IsResponding;
-            if (response && !responding) responsePulse = .45f;
+            if (response && !responding && !dying)
+            {
+                responsePulse = .45f;
+                AudioBus?.InterceptorAlert(transform.position);
+            }
             responding = response;
             responsePulse = Mathf.Max(0f, responsePulse - dt);
             pose.SetAwareness(awareness);
@@ -293,7 +343,7 @@ namespace ShiftFour
             }
             if (!dying && scout == null) WeaponMount?.AimAt(brain != null ? brain.WeaponAimPoint : null);
             if (OutdoorFlight && !dying && (pose.FireFlash > 0f || previousTint.x > 0f))
-                WeaponMount.SetRecoil(pose.FireFlash);
+                WeaponMount?.SetRecoil(pose.FireFlash);
             effects?.Tick(dt);
             float degrees = rotorRpm * 6f * pose.RotorTravel;
             if (State == DroneVisualState.Disabled) { pose.StopRotors(); degrees = 0f; }
@@ -325,6 +375,12 @@ namespace ShiftFour
             {
                 if (Time.time < nextDistantTint) return;
                 nextDistantTint = Time.time + .1f;
+            }
+            if (airframe != null && State != DroneVisualState.Disabled)
+            {
+                float elapsed = Mathf.Max(dt, Time.time - lastDetailUpdate);
+                airframe.Step(interceptorBrain, pose, Mathf.Min(.2f, elapsed), dying, failureFlash);
+                lastDetailUpdate = Time.time;
             }
             if (tintState == previousTint && alert == previousAlert) return;
             previousTint = tintState;

@@ -70,6 +70,7 @@ namespace ShiftFour
 
         internal void PoseKnifeWrist(Vector3 position, Quaternion rotation, float turn)
         {
+            if (!Initialize()) return;
             dominant.Solve(position, rotation, rightElbowHint.position, maximumWristDeviation, 32f * turn);
         }
 

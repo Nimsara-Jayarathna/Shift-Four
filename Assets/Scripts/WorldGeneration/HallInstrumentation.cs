@@ -8,9 +8,9 @@ namespace ShiftFour
 {
     // All instrument faces use the same quad and material. Only mission transitions need CPU writes.
     [DisallowMultipleComponent]
-    internal sealed class HallInstrumentation : MonoBehaviour
+    internal sealed partial class HallInstrumentation : MonoBehaviour
     {
-        private enum Pattern { Curtain, Strip, Rack, Network, Fan, Radar, Map, Core, Hazard, Hull, Lining, Chamber }
+        private enum Pattern { Curtain, Strip, Rack, Network, Fan, Radar, Map, Core, Hazard, Hull, Lining, Chamber, Credential, Lane, CredentialProgress, Survey, Telemetry }
         [Serializable]
         private struct Face
         {
@@ -54,7 +54,7 @@ namespace ShiftFour
             {
                 case 0: fx.Checkpoint(props, m, font); break;
                 case 1: fx.Server(props); break;
-                case 2: fx.Control(props, m); break;
+                case 2: fx.Control(props, m, font); break;
                 case 3: fx.Storage(props, m, font); break;
             }
             fx.Refresh(true);
@@ -89,7 +89,7 @@ namespace ShiftFour
         {
             var arch = props.Find("Security scanner");
             Faceplate("Security wall lining", props, new Vector3(0, 2.82f, 11.53f), 19.5f, 3.9f, Pattern.Lining, Amber);
-            Faceplate("Optical scan field", arch, new Vector3(0, 1.51f, -.40f), 4.62f, 2.78f, Pattern.Curtain, Cyan);
+            Faceplate("Optical scan field", arch, new Vector3(0, 1.51f, -.40f), 4.62f, 2.78f, Pattern.Curtain, Amber, true);
             for (int s = -1; s <= 1; s += 2)
             {
                 Faceplate("Arch light rail", arch, new Vector3(s * 2.5f, 1.62f, -.43f), 2.72f, .13f, Pattern.Strip, Amber, true, 0, 90);
@@ -104,10 +104,11 @@ namespace ShiftFour
                 Faceplate("Optic", cam, new Vector3(0, -.19f, -.433f), .19f, .19f, Pattern.Radar, Cyan);
             }
             scanner = props.GetComponentInChildren<CheckpointSecurityScanner>(true);
+            BuildInspectionChamber(props, arch, m, font);
             var reader = scanner.transform;
             authentication = Label("ACCESS GRANTED", reader, new Vector3(0, -.365f, -.149f), .09f, font, 1.27f, .115f, m.Lettering);
             authentication.name = "Authentication status";
-            Faceplate("Authentication ticks", reader, new Vector3(0, -.26f, -.177f), 1.35f, .043f, Pattern.Strip, Amber, true);
+            Faceplate("Authentication ticks", reader, new Vector3(0, -.26f, -.177f), 1.35f, .043f, Pattern.CredentialProgress, Amber, true);
             Faceplate("Desk security scope", props.Find("Security desk"), new Vector3(0, 1.45f, .026f), 1.28f, .63f, Pattern.Radar, Cyan);
             for (int s = -1; s <= 1; s += 2)
                 Faceplate("Wall marker", props, new Vector3(s * 7.4f, 2.55f, 11.51f), 4.7f, .10f, Pattern.Strip, Amber, true);
@@ -135,37 +136,6 @@ namespace ShiftFour
                 var edge = Group("Rack aisle lighting", props, new Vector3(s * 3.0f, .02f, 1.6f));
                 edge.localRotation = Quaternion.Euler(90, 90, 0);
                 Faceplate("Floor-edge guide", edge, Vector3.zero, 8.0f, .075f, Pattern.Strip, Blue);
-            }
-        }
-
-        private void Control(Transform props, PrototypeMaterials m)
-        {
-            lockdown = props.GetComponentInChildren<ControlLockdownMission>(true);
-            var panel = lockdown.transform;
-            Faceplate("Operations wall lining", props, new Vector3(0, 3.14f, 12.53f), 16.3f, 4.5f, Pattern.Lining, Teal);
-            Casing("Projection rail", panel, new Vector3(0, 2.49f, 0), new Vector3(4.15f, .08f, .39f), m.Metal);
-            var map = Group("Facility projection", panel, new Vector3(0, 3.06f, .12f));
-            map.localRotation = Quaternion.Euler(53, 0, 0);
-            Faceplate("Survey grid", map, Vector3.zero, 4.10f, 1.70f, Pattern.Map, Cyan);
-            // Raised wireframe volumes sit on the four registered footprints of the schematic.
-            for (int x = -1; x <= 1; x += 2)
-            for (int y = -1; y <= 1; y += 2)
-            {
-                float rise = x == 1 && y == 1 ? .62f : .34f;
-                var hull = Surface("Projected building", map, new Vector3(x * 1.045f, y * .365f, -rise * .5f),
-                    new Vector3(.735f, .22f, rise), cube, instrument, Quaternion.identity);
-                faces.Add(new Face { renderer = hull, ink = Teal, pattern = Pattern.Hull });
-            }
-            Faceplate("Projection bed", panel, new Vector3(0, 2.535f, 0), 3.95f, .28f, Pattern.Strip, Teal, false, 90);
-            foreach (Transform fixture in props)
-            {
-                if (fixture.name == "Operations monitor")
-                {
-                    Faceplate("Tactical scope", fixture, new Vector3(-.66f, .12f, -.146f), 1.07f, 1.07f, Pattern.Radar, Teal);
-                    Faceplate("Sector telemetry", fixture, new Vector3(.66f, .12f, -.146f), 1.25f, .90f, Pattern.Map, Cyan);
-                }
-                if (fixture.name == "Emergency warning beacon")
-                    Faceplate("Lockdown annunciator", fixture, new Vector3(0, 0, -.276f), .56f, .27f, Pattern.Strip, Alarm, true);
             }
         }
 
@@ -198,17 +168,24 @@ namespace ShiftFour
             }
         }
 
-        private void OnEnable() => Refresh(true);
+        private void OnEnable()
+        {
+            BindCardImprint();
+            Refresh(true);
+        }
         private void Update()
         {
             if (Time.time < nextSample) return;
             nextSample = Time.time + .15f;
+            if (lockdown != null) RefreshCommandDeck();
             Refresh(false);
         }
         private void Refresh(bool all)
         {
             float state = 0;
-            if (scanner != null) state = scanner.IsComplete ? 1 : -1;
+            if (scanner != null)
+                state = scanner.IsVerifying ? Mathf.Clamp(scanner.ScanProgress, .02f, .98f) :
+                    scanner.IsComplete ? 1 : scanner.HasCard ? 0 : -1;
             if (lockdown != null) state = lockdown.IsComplete ? 2 : -1;
             if (generator != null) state = generator.IsComplete ? 1 : 0;
             if (network != null && terminals.Length > 0)
@@ -219,12 +196,13 @@ namespace ShiftFour
             }
             if (!all && state == lastState) return;
             lastState = state;
-            if (authentication != null) authentication.text = state > 0 ? "ACCESS GRANTED" : "LOCKED";
+            if (scanner != null) UpdateInspection(state);
             block ??= new MaterialPropertyBlock();
             foreach (var face in faces)
             {
                 if (!all && !face.followsMission) continue;
                 Color ink = face.ink;
+                if (face.followsMission && scanner != null && state >= 0) ink = Cyan;
                 if (face.followsMission && state >= 1 && (scanner != null || lockdown != null)) ink = Teal;
                 if (face.followsMission && network != null && state < 0) ink = Alarm;
                 block.SetColor(Ink, ink);

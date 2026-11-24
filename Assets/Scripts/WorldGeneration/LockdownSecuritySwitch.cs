@@ -11,6 +11,7 @@ namespace ShiftFour
         [SerializeField] private TextMesh status;
         private MaterialPropertyBlock properties;
 
+        internal int Number => number;
         public bool IsActivated { get; private set; }
         public string Prompt => IsActivated ? $"SWITCH {number} DISABLED" : $"E: Activate SWITCH {number}";
 

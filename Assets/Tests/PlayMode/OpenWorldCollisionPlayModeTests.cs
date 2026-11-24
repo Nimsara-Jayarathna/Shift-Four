@@ -2,6 +2,7 @@
 using System;
 using System.Collections;
 using System.Linq;
+using System.IO;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEditor.SceneManagement;
@@ -72,16 +73,179 @@ namespace ShiftFour.Tests
                     Assert.That(displays.Length, Is.GreaterThan(0));
                     Assert.That(displays.All(r => r.GetComponent<Collider>() == null), Is.True, site);
                 }
+                var roomRoot = World.Find("Buildings/Checkpoint/Interior");
+                var chamber = roomRoot.Find("Hall instrumentation/Inspection chamber");
+                var solids = chamber.GetComponentsInChildren<Collider>(true);
+                Assert.That(solids.Length, Is.EqualTo(8));
+                Assert.That(solids.All(c => c is BoxCollider && c.transform == chamber.Find("Surveillance gallery")), Is.True);
+                Assert.That(chamber.Find("Architectural metalwork").childCount, Is.InRange(3, 7));
+                var lane = chamber.Find("Lane clearance").GetComponent<TextMesh>();
+                Assert.That(lane.text, Is.EqualTo("CREDENTIAL REQUIRED"));
                 Assert.That(Level(checkpoint), Is.LessThan(0));
                 Assert.That(Level(server), Is.Zero);
                 Assert.That(Level(control), Is.LessThan(0));
                 Assert.That(Level(storage), Is.Zero);
                 for (int i = 0; i < Sites.Length; i++) Complete(i);
                 yield return new WaitForSeconds(.22f);
+                Assert.That(lane.text, Is.EqualTo("AUTHENTICATION ACTIVE"));
+                Assert.That(Level(checkpoint), Is.InRange(.01f, .98f));
+                yield return new WaitForSeconds(1.45f);
+                Assert.That(lane.text, Is.EqualTo("ACCESS GRANTED"));
                 Assert.That(Level(checkpoint), Is.EqualTo(1));
                 Assert.That(Level(server), Is.EqualTo(1));
                 Assert.That(Level(control), Is.GreaterThan(1), "Secured, steady lighting");
                 Assert.That(Level(storage), Is.EqualTo(1));
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator ControlProjectionUsesGeneratedFootprintsAndImmediateMissionRewards()
+        {
+            foreach (int seed in new[] { 1234, 5678, 9012 })
+            {
+                Generate(seed);
+                yield return null;
+                var room = World.Find("Buildings/Control/Interior");
+                var props = room.Find("Props");
+                var panel = props.Find("LOCKDOWN OVERRIDE");
+                var projection = panel.Find("Facility projection");
+                var worldBounds = World.Find("Ground").GetComponent<BoxCollider>().bounds;
+                float scale = 3.88f / Mathf.Max(worldBounds.size.x, worldBounds.size.z);
+                foreach (string site in Sites.Concat(new[] { "Extraction" }))
+                {
+                    var landmark = site == "Extraction" ? World.Find("Final Extraction Gate") : World.Find("Buildings/" + site + "/Foundation");
+                    Vector3 delta = landmark.position - worldBounds.center;
+                    Vector3 pin = projection.Find(site.ToUpperInvariant()).localPosition;
+                    Assert.That(pin.x, Is.EqualTo(delta.x * scale).Within(.001f), site);
+                    Assert.That(pin.y, Is.EqualTo(delta.z * scale).Within(.001f), site);
+                }
+                Assert.That(projection.Cast<Transform>().Count(t => t.name == "Road"),
+                    Is.EqualTo(World.Find("Roads").Cast<Transform>().Count(t => t.TryGetComponent<BoxCollider>(out var slab) && slab.enabled)));
+                Assert.That(projection.GetComponentsInChildren<Collider>(), Is.Empty);
+                Assert.That(room.Find("Hall instrumentation/Command deck metalwork").GetComponentsInChildren<Collider>(), Is.Empty);
+                var switches = room.GetComponentsInChildren(RuntimeType("LockdownSecuritySwitch"));
+                Assert.That(switches.Length, Is.EqualTo(3));
+                var inventory = player.GetComponent(RuntimeType("OutdoorPlayerEquipment"));
+                bool StorageKey() => (bool)inventory.GetType().GetProperty("HasStorageKey", Members).GetValue(inventory);
+                Call(Action(panel), "Interact");
+                Assert.That(StorageKey(), Is.False);
+                if (seed == 1234) yield return CaptureAssessmentView(room, "lockdown", new Vector3(-2, 2.2f, -6), new Vector3(0, 3.9f, 10));
+                foreach (var station in switches)
+                {
+                    Assert.That(station.transform.Find("Subsystem signal").GetComponent<Collider>(), Is.Null);
+                    Call(station, "Interact"); Call(station, "Interact");
+                }
+                Assert.That(StorageKey(), Is.False);
+                var text = panel.GetComponentsInChildren<TextMesh>().Select(t => t.text).ToArray();
+                Assert.That(text.Any(t => t.Contains("3 / 3") && t.Contains("OVERRIDE AUTHORIZED")), Is.True);
+                Call(Action(panel), "Interact");
+                Assert.That(StorageKey(), Is.True, "The cinematic must not delay the key.");
+                yield return new WaitForSeconds(1.45f);
+                Assert.That(props.GetComponentsInChildren<TextMesh>().Any(t => t.text == "CONTROL  /  COMPLETE"), Is.True);
+                Assert.That(props.GetComponentsInChildren<Light>().All(l => l.color.g > l.color.r), Is.True);
+                if (seed == 1234)
+                {
+                    yield return CaptureAssessmentView(room, "restored", new Vector3(-1.8f, 3.5f, 6), new Vector3(0, 3.1f, 11));
+                    var hall = room.GetComponentInChildren(RuntimeType("HallInstrumentation"));
+                    var refresh = (System.Action)hall.GetType().GetMethod("RefreshCommandDeck", Members)
+                        .CreateDelegate(typeof(System.Action), hall);
+                    refresh();
+                    long calibration = MeasuredAllocation.Calibrate();
+                    var clock = new System.Diagnostics.Stopwatch();
+                    long allocations = MeasuredAllocation.Events(() =>
+                    {
+                        clock.Start();
+                        for (int i = 0; i < 4000; i++) refresh();
+                        clock.Stop();
+                    }, out _);
+                    Debug.Log($"Control deck: 4000 steady-state samples in {clock.Elapsed.TotalMilliseconds:F3} ms, " +
+                        $"{allocations} managed allocation events (calibration {calibration}).");
+                    Assert.That(allocations, Is.Zero);
+                }
+            }
+        }
+
+        // Opt-in assessment evidence from the generated scene. This camera only exists during the test.
+        private static IEnumerator CaptureAssessmentView(Transform frame, string state, Vector3 position, Vector3 focus)
+        {
+            string directory = Environment.GetEnvironmentVariable("SHIFTFOUR_CONTROL_CAPTURE");
+            if (string.IsNullOrEmpty(directory)) yield break;
+            var camera = new GameObject("Phase D assessment camera").AddComponent<Camera>();
+            var target = new RenderTexture(1280, 720, 24);
+            var pixels = new Texture2D(target.width, target.height, TextureFormat.RGB24, false);
+            var previous = RenderTexture.active;
+            try
+            {
+                camera.fieldOfView = 57;
+                camera.targetTexture = target;
+                camera.transform.position = frame.TransformPoint(position);
+                camera.transform.LookAt(frame.TransformPoint(focus));
+                yield return null;
+                RenderTexture.active = target;
+                pixels.ReadPixels(new Rect(0, 0, target.width, target.height), 0, 0);
+                pixels.Apply();
+                Directory.CreateDirectory(directory);
+                using var output = File.Create(Path.Combine(directory, state + ".ppm"));
+                byte[] header = System.Text.Encoding.ASCII.GetBytes($"P6\n{target.width} {target.height}\n255\n");
+                output.Write(header, 0, header.Length);
+                byte[] rows = pixels.GetRawTextureData();
+                int stride = target.width * 3;
+                for (int y = target.height - 1; y >= 0; y--) output.Write(rows, y * stride, stride);
+            }
+            finally
+            {
+                RenderTexture.active = previous;
+                camera.targetTexture = null;
+                Object.Destroy(camera.gameObject);
+                Object.Destroy(target);
+                Object.Destroy(pixels);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator InspectionLaneAndCredentialTargetsStayAccessibleAcrossSeeds()
+        {
+            Mesh previousTrim = null;
+            foreach (int seed in new[] { 1234, 5678, 9012 })
+            {
+                Generate(seed);
+                yield return null;
+                yield return null;
+                Assert.That(previousTrim == null, Is.True, "Retiring the room releases its generated steelwork");
+                Transform room = World.Find("Buildings/Checkpoint");
+                previousTrim = room.Find("Interior/Hall instrumentation/Inspection chamber/Architectural metalwork")
+                    .GetComponentInChildren<MeshFilter>().sharedMesh;
+                var guard = room.GetComponentInChildren(RuntimeType("GuardBrain"));
+                Assert.That(guard.GetComponent<NavMeshAgent>().isOnNavMesh, Is.True);
+                Place(room.TransformPoint(new Vector3(0, .23f, -7.5f)));
+                Walk(room.forward, 6f);
+                Assert.That(room.InverseTransformPoint(player.transform.position).z, Is.GreaterThan(-2f));
+
+                var card = Find("SecurityAccessCard").Single();
+                var reader = Find("CheckpointSecurityScanner").Single();
+                void Use(Component item)
+                {
+                    Vector3 target = item.transform.position;
+                    Vector3 feet = target - item.transform.forward * 1.5f;
+                    feet.y = room.position.y + .23f;
+                    Place(feet);
+                    camera.transform.LookAt(target);
+                    Assert.That(Physics.Raycast(camera.transform.position, camera.transform.forward, out var hit, 3f,
+                        ~0, QueryTriggerInteraction.Ignore), Is.True);
+                    Assert.That(hit.collider.GetComponentInParent(item.GetType()), Is.SameAs(item));
+                    Call(item, "Interact");
+                }
+                Use(reader);
+                Assert.That(reader.GetType().GetProperty("Notice").GetValue(reader), Is.EqualTo("SECURITY CARD REQUIRED"));
+                Use(card);
+                var lane = room.Find("Interior/Hall instrumentation/Inspection chamber/Lane clearance").GetComponent<TextMesh>();
+                yield return new WaitForSeconds(.2f);
+                Assert.That(lane.text, Is.EqualTo("PRESENT CARD AT READER"));
+                Use(reader);
+                var inventory = player.GetComponent(RuntimeType("OutdoorPlayerEquipment"));
+                Assert.That(inventory.GetType().GetProperty("HasServerKey", Members).GetValue(inventory), Is.True);
+                Assert.That(reader.GetType().GetProperty("IsVerifying", Members).GetValue(reader), Is.True);
+                // The next generation retires a live verification and must start locked.
             }
         }
 
@@ -505,6 +669,12 @@ namespace ShiftFour.Tests
                     gateHit.collider.transform.IsChildOf(gate), Is.True, "Extraction E ray reaches the gate from the road.");
                 Call(Action(gate), "Interact");
                 Assert.That(mission.GetType().GetProperty("Escaped").GetValue(mission), Is.True);
+                Transform shutter = gate.Find("Extraction shutter");
+                float openingDeadline = Time.unscaledTime + 7f;
+                while (shutter.localPosition.y < 3.9f && Time.unscaledTime < openingDeadline)
+                    yield return null;
+                Assert.That(shutter.localPosition.y, Is.GreaterThanOrEqualTo(3.9f),
+                    "The cinematic must raise the physical shutter before testing the passage.");
                 Physics.SyncTransforms();
                 Walk(gate.forward, 3.6f);
                 Assert.That(gate.InverseTransformPoint(player.transform.position).z, Is.GreaterThan(1f),
@@ -558,7 +728,7 @@ namespace ShiftFour.Tests
             Assert.That(sparks.All(r => !r.enabled), Is.True);
             var hud = player.GetComponent(RuntimeType("CombatHud"));
             Call(hud, "Update");
-            Assert.That(Call(hud, "IsDroneBarVisible", target), Is.False, "Aiming alone never reveals the bar");
+            Assert.That(Call(hud, "IsDroneBarVisible", target), Is.True, "Aiming at the visible Scout reveals its identification");
             var weapon = player.GetComponent(RuntimeType("WeaponController"));
             Assert.That(Call(weapon, "TryFire"), Is.EqualTo(true));
             Call(hud, "Update");
@@ -572,6 +742,54 @@ namespace ShiftFour.Tests
             Call(health, "TakeDamage", 1000f);
             Call(hud, "Update");
             Assert.That(Call(hud, "IsDroneBarVisible", target), Is.False, "The bar hides immediately on death");
+        }
+
+        [UnityTest]
+        public IEnumerator OutdoorIdentificationResolvesEachRoleAndRespectsCover()
+        {
+            var hud = player.GetComponent(RuntimeType("CombatHud"));
+            var bars = ((IEnumerable)hud.GetType().GetField("drones", Members).GetValue(hud)).Cast<object>();
+            foreach (string role in new[] { "Scout", "Flanker", "Guard", "Interceptor" })
+            {
+                var target = Find(role + "Brain").First();
+                object bar = bars.Single(b => (Component)b.GetType().GetField("Brain").GetValue(b) == target);
+                Assert.That(bar.GetType().GetField("Label").GetValue(bar), Is.EqualTo(role.ToUpperInvariant()));
+                var rig = target.GetComponentInChildren(RuntimeType("DroneRotorVisuals")).transform;
+                bool brow = role == "Interceptor";
+                yield return CaptureAssessmentView(rig, role.ToLowerInvariant(),
+                    brow ? new Vector3(.47f, .65f, 2.25f) : new Vector3(.51f, .40f, 2.07f),
+                    brow ? new Vector3(0, .18f, .45f) : new Vector3(0, .06f, .31f));
+                var health = target.GetComponent(RuntimeType("Health"));
+                Vector3 center = target.GetComponent<CapsuleCollider>().bounds.center;
+                bool clear = false;
+                for (int angle = 0; angle < 360 && !clear; angle += 30)
+                {
+                    Vector3 eye = center + Quaternion.Euler(0, angle, 0) * Vector3.forward * 2.6f;
+                    Place(player.transform.position + eye - camera.transform.position);
+                    camera.transform.LookAt(center);
+                    clear = Physics.Raycast(camera.transform.position, camera.transform.forward, out var hit,
+                        4f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore) &&
+                        hit.collider.GetComponentInParent(RuntimeType("Health")) == health;
+                }
+                Assert.That(clear, Is.True, role);
+                Call(hud, "Update");
+                Assert.That(Call(hud, "IsDroneBarVisible", target), Is.True, role);
+                float before = (float)health.GetType().GetProperty("Current").GetValue(health);
+                Call(health, "ApplyDamage", 1f, player, "Identification fixture");
+                Assert.That((float)health.GetType().GetProperty("Current").GetValue(health), Is.EqualTo(before - 1f));
+                var obstruction = new GameObject("Opaque cover").AddComponent<BoxCollider>();
+                obstruction.transform.position = (camera.transform.position + center) * .5f;
+                obstruction.size = Vector3.one * 1.5f;
+                Physics.SyncTransforms();
+                Call(hud, "Update");
+                Assert.That(Call(hud, "IsDroneBarVisible", target), Is.False, "Cover hides recent damage");
+                obstruction.enabled = false;
+                Object.Destroy(obstruction.gameObject);
+                Call(health, "TakeDamage", 1000f);
+                Call(hud, "Update");
+                Assert.That(Call(hud, "IsDroneBarVisible", target), Is.False, "Dead " + role);
+            }
+            yield return null;
         }
 
         [UnityTest]
@@ -596,6 +814,11 @@ namespace ShiftFour.Tests
                     var brain = root.GetComponent(RuntimeType("DroneBrain"));
                     Assert.That(visual.GetType().GetField("flightRole", Members).GetValue(visual).ToString(),
                         Is.EqualTo(brain.GetType().Name.Replace("Brain", "")));
+                    var stamps = visual.GetComponentsInChildren<TextMesh>().Where(t => t.name == "Chassis stencil").ToArray();
+                    Assert.That(stamps.Length, Is.EqualTo(1));
+                    Assert.That(stamps[0].text, Is.EqualTo(brain.GetType().Name.Replace("Brain", "").ToUpperInvariant()));
+                    Assert.That(stamps[0].transform.parent, Is.EqualTo(visual.transform));
+                    Assert.That(stamps[0].GetComponent<Collider>(), Is.Null);
                     var shapes = rig.GetComponentsInChildren<MeshCollider>();
                     Assert.That(shapes.Length, Is.GreaterThanOrEqualTo(5));
                     var rest = shapes.Select(c => c.transform.localToWorldMatrix).ToArray();

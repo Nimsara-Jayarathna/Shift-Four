@@ -27,7 +27,7 @@ namespace ShiftFour
             const float x = 24, y = 22, width = 346;
             Fill(new Rect(x, y, width, 100), Ink);
             Fill(new Rect(x, y, 3, 100), SiteColors[i]);
-            Text(new Rect(x + 14, y + 6, 205, 18), hud.ObjectiveUpdated ? "OBJECTIVE UPDATED" : "CURRENT OBJECTIVE", 12, Cyan, true);
+            Text(new Rect(x + 14, y + 6, 160, 18), hud.ObjectiveUpdated ? "OBJECTIVE UPDATED" : "CURRENT OBJECTIVE", 12, Cyan, true);
             Text(new Rect(x + 228, y + 6, 110, 18), "TAB  List   M  Map", 12, Muted, false);
             Text(new Rect(x + 14, y + 27, width - 25, 26), Names[i] + "  /  " + Titles[i], 19, Paper, true);
             lettering.wordWrap = true;
@@ -37,10 +37,10 @@ namespace ShiftFour
             {
                 Fill(new Rect(x, y + 95, width, 5), Surface);
                 Fill(new Rect(x, y + 95, width * row.Count / row.Total, 5), SiteColors[i]);
-                Text(new Rect(x + width - 68, y + 28, 65, 24), $"{row.Count} / {row.Total}", 15, SiteColors[i], true);
+                Text(new Rect(x + 175, y + 6, 50, 18), $"{row.Count} / {row.Total}", 13, SiteColors[i], true);
             }
             string notice = hud.InteractionNotice;
-            if (string.IsNullOrEmpty(notice)) return;
+            if (string.IsNullOrEmpty(notice) || notice == hud.FocusedPrompt) return;
             lettering.wordWrap = true;
             lettering.fontSize = 14;
             noticeContent.text = notice;
@@ -48,6 +48,34 @@ namespace ShiftFour
             Fill(new Rect(x, y + 105, width, height), Ink);
             Text(new Rect(x + 14, y + 105, width - 28, height), notice, 14, Amber, false);
             lettering.wordWrap = false;
+        }
+
+        private void DrawMissionNotice(PrototypePlayerFeedback hud, float screenWidth)
+        {
+            var message = hud.ActiveNotice;
+            if (message.Title == null) return;
+            float previousAlpha = alpha;
+            alpha *= hud.NoticeOpacity;
+            float x = (screenWidth - 408) * .5f, y = 22 - 5 * (1 - hud.NoticeOpacity);
+            float height = message.Next == null ? 57 : 81;
+            Color accent = message.Kind switch
+            {
+                PrototypePlayerFeedback.NoticeKind.Completion => Green,
+                PrototypePlayerFeedback.NoticeKind.Warning => Amber,
+                _ => Cyan
+            };
+            Fill(new Rect(x, y, 408, height), Ink);
+            Fill(new Rect(x, y, 3, height), accent);
+            Text(new Rect(x + 16, y + 5, 384, 25), message.Title, 18, accent, true);
+            Text(new Rect(x + 16, y + 29, 384, 21), message.Detail, 15, Paper, false);
+            if (message.Next != null)
+            {
+                bool secured = message.Site == Site.Checkpoint;
+                Text(new Rect(x + 16, y + 52, 120, 23), secured ? "NEW OBJECTIVE" : "NEXT", 12, Cyan, true);
+                float inset = secured ? 136 : 68;
+                Text(new Rect(x + inset, y + 52, 395 - inset, 23), message.Next, 14, Paper, false);
+            }
+            alpha = previousAlpha;
         }
 
         private void DrawBriefing(OutdoorMissionMenu menu, float w, float h, bool busy)
@@ -64,13 +92,18 @@ namespace ShiftFour
             if (map) DrawMap(hud, x, top + 62, busy);
             else
             {
-                for (int i = (int)Site.Checkpoint; i <= (int)Site.Extraction; i++)
+                for (int i = (int)Site.Supply; i <= (int)Site.Extraction; i++)
                 {
                     var row = hud.ReadObjective((Site)i);
-                    float y = top + 69 + (i - 1) * 101;
+                    float y = top + 64 + i * 87;
                     Color accent = row.Status == Status.Complete ? Green : SiteColors[i];
-                    Fill(new Rect(x, y, 1080, 87), Surface);
-                    Fill(new Rect(x, y, 4, 87), accent);
+                    Fill(new Rect(x, y, 1080, 78), Surface);
+                    Fill(new Rect(x, y, 4, 78), accent);
+                    if (row.Site == hud.CurrentSite)
+                    {
+                        Outline(new Rect(x, y, 1080, 78), Amber);
+                        Text(new Rect(x + 560, y + 9, 240, 27), "CURRENT OBJECTIVE", 14, Amber, true);
+                    }
                     Text(new Rect(x + 21, y + 9, 345, 32), Names[i] + "  /  " + Titles[i], 20, Paper, true);
                     Text(new Rect(x + 21, y + 43, 790, 28), row.Instruction, 16, Muted, false);
                     Text(new Rect(x + 830, y + 10, 234, 25), States[(int)row.Status], 15, accent, true);

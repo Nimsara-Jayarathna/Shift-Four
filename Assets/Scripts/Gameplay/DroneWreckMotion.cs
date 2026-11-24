@@ -41,7 +41,7 @@ namespace ShiftFour
             using (GeometryProfile.Auto())
             foreach (MeshFilter filter in owner.GetComponentsInChildren<MeshFilter>(true))
             {
-                if (filter.sharedMesh == null) continue;
+                if (filter.sharedMesh == null || owner.IsAirframeDetail(filter.transform)) continue;
                 Bounds local = filter.sharedMesh.bounds;
                 var bounds = new Bounds(go.transform.InverseTransformPoint(filter.transform.TransformPoint(local.center)), Vector3.zero);
                 for (int i = 0; i < 8; i++)

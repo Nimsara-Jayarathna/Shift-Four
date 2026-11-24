@@ -21,6 +21,7 @@ namespace ShiftFour
         private AudioSource ambience, motor, signal;
         private AudioClip authenticate, relay, reject, advisory;
         private float presence, running, signalLevel, nextAlarm, nextReject;
+        private float confirmAt = -1f;
         private bool bound, ambiencePlaying, motorPlaying;
 
         internal static void Bind(Transform buildings, PlayerController actor, CheckpointSecurityScanner scanner,
@@ -45,7 +46,7 @@ namespace ShiftFour
                     hall.signal = hall.Source("Equipment signal", false);
                     hall.authenticate = Clip("Authenticate");
                     hall.relay = Clip("Relay");
-                    if (index == 0) hall.reject = Clip("Reject");
+                    if (index <= 1) hall.reject = Clip("Reject");
                     if (index == 2) hall.advisory = Clip("Advisory");
                     if (index == 3 && generator != null)
                     {
@@ -88,19 +89,56 @@ namespace ShiftFour
         {
             if (bound || mix == null || !isActiveAndEnabled) return;
             bound = true;
-            if (scanner != null) { scanner.Completed += Authenticated; scanner.Denied += Denied; }
-            if (network != null) network.TerminalActivated += TerminalActivated;
-            if (lockdown != null) lockdown.Completed += LockdownCleared;
-            if (generator != null) { generator.CellCollected += CellCollected; generator.Restored += GeneratorStarted; }
+            if (scanner != null)
+            {
+                scanner.Completed += VerificationStarted;
+                scanner.VerificationFinished += Authenticated;
+                scanner.Denied += Denied;
+                scanner.CardCollected += CardCollected;
+            }
+            if (network != null)
+            {
+                network.TerminalActivated += TerminalActivated;
+                network.SequenceRejected += SequenceRejected;
+            }
+            if (lockdown != null)
+            {
+                lockdown.Completed += LockdownCleared;
+                lockdown.SwitchActivated += SwitchActivated;
+            }
+            if (generator != null)
+            {
+                generator.CellCollected += CellCollected;
+                generator.Restored += GeneratorStarted;
+            }
         }
 
         private void Unsubscribe()
         {
             if (!bound) return;
-            if (scanner != null) { scanner.Completed -= Authenticated; scanner.Denied -= Denied; }
-            if (network != null) network.TerminalActivated -= TerminalActivated;
-            if (lockdown != null) lockdown.Completed -= LockdownCleared;
-            if (generator != null) { generator.CellCollected -= CellCollected; generator.Restored -= GeneratorStarted; }
+            if (scanner != null)
+            {
+                scanner.Completed -= VerificationStarted;
+                scanner.VerificationFinished -= Authenticated;
+                scanner.Denied -= Denied;
+                scanner.CardCollected -= CardCollected;
+            }
+            if (network != null)
+            {
+                network.TerminalActivated -= TerminalActivated;
+                network.SequenceRejected -= SequenceRejected;
+            }
+            if (lockdown != null)
+            {
+                lockdown.Completed -= LockdownCleared;
+                lockdown.SwitchActivated -= SwitchActivated;
+            }
+            if (generator != null)
+            {
+                generator.CellCollected -= CellCollected;
+                generator.Restored -= GeneratorStarted;
+            }
+            confirmAt = -1f;
             bound = false;
         }
 
@@ -128,6 +166,12 @@ namespace ShiftFour
             {
                 presence = Mathf.MoveTowards(presence, Proximity(), Time.deltaTime * 1.8f);
                 running = Mathf.MoveTowards(running, generator != null && generator.IsComplete ? 1f : 0f, Time.deltaTime * .8f);
+                if (confirmAt >= 0f && Time.time >= confirmAt)
+                {
+                    confirmAt = -1f;
+                    if (lockdown != null && lockdown.IsComplete)
+                        Signal(authenticate, lockdown.transform.position + Vector3.up * 1.7f, .30f, 1.18f);
+                }
                 if (lockdown != null && !lockdown.IsComplete)
                 {
                     if (presence < .75f) nextAlarm = Time.time + 3f;
@@ -164,13 +208,25 @@ namespace ShiftFour
             signal.Play();
         }
 
-        private void Denied()
+        private void CardCollected(SecurityAccessCard card) => Signal(relay, card.transform.position, .23f);
+        private void SwitchActivated(LockdownSecuritySwitch item)
+        {
+            bool ready = lockdown.ActivatedCount == lockdown.TotalSwitches;
+            Signal(ready ? authenticate : relay, item.transform.position + Vector3.up * 1.5f,
+                ready ? .32f : .24f, .86f + .1f * lockdown.ActivatedCount);
+            nextAlarm = Time.time + 12f;
+        }
+        private void SequenceRejected(ServerTerminal terminal) => RejectAt(terminal.transform.position);
+        private void Denied() => RejectAt(scanner.transform.position);
+
+        private void RejectAt(Vector3 position)
         {
             if (Time.time < nextReject) return;
             nextReject = Time.time + 1.4f;
-            Signal(reject, scanner.transform.position, .27f);
+            Signal(reject, position, .27f);
         }
 
+        private void VerificationStarted(CheckpointSecurityScanner reader) => Signal(relay, reader.transform.position, .26f, 1.18f);
         private void Authenticated(CheckpointSecurityScanner reader) => Signal(authenticate, reader.transform.position, .36f);
 
         private void TerminalActivated(ServerTerminal terminal)
@@ -183,7 +239,8 @@ namespace ShiftFour
         private void LockdownCleared(ControlLockdownMission panel)
         {
             signal.Stop();
-            Signal(authenticate, panel.transform.position + Vector3.up * 1.7f, .3f, .84f);
+            Signal(relay, panel.transform.position + Vector3.up * 1.7f, .26f, .92f);
+            confirmAt = Time.time + ControlLockdownMission.VerificationDuration;
         }
 
         private void CellCollected(PowerCellPickup cell) => Signal(relay, cell.transform.position, .34f, .72f);

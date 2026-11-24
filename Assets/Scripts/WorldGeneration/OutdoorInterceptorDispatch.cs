@@ -71,6 +71,8 @@ namespace ShiftFour
                 if (brain != null) hub.stations.Add(brain);
             }
 
+            if (Debug.isDebugBuild)
+                hub.gameObject.AddComponent<OutdoorInterceptorDiagnostics>().Bind(player, hub.stations);
             hub.alerts = alerts;
             alerts.AlertRaised += hub.OnScoutAlert;
             return hub;

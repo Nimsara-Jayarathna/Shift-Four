@@ -29,7 +29,7 @@ namespace ShiftFour
         internal int TotalCells => RequiredCells;
         public bool IsComplete { get; private set; }
         private bool HasCells => collected == RequiredCells;
-        public string Prompt => IsComplete ? PowerRestored : "E: Restore Emergency Generator Power";
+        public string Prompt => IsComplete ? PowerRestored : HasCells ? "E: Restore Emergency Generator Power" : "TWO POWER CELLS REQUIRED";
         public string Objective => IsComplete ? CompletionMessage :
             HasCells ? "Restore Emergency Generator Power" : $"Collect Power Cells ({collected}/{RequiredCells})";
         public string Hint => IsComplete ? PowerRestored :

@@ -150,6 +150,85 @@ namespace ShiftFour.Tests
         }
 
         [UnityTest]
+        public IEnumerator MissionNoticesFollowAcceptedInteractionsAndResetWithTheLayout()
+        {
+            yield return StartMission();
+            var hud = Single("PrototypePlayerFeedback");
+            var generator = Single("WorldGenerator");
+            var active = hud.GetType().GetProperty("ActiveNotice", Internal);
+            var notices = (IList)hud.GetType().GetField("notices", Internal).GetValue(hud);
+            string Field(string name)
+            {
+                object entry = active.GetValue(hud);
+                return (string)entry.GetType().GetField(name, Internal).GetValue(entry);
+            }
+            void Expect(string title, string detail = null, string next = null)
+            {
+                Assert.That(Field("Title"), Is.EqualTo(title));
+                if (detail != null) Assert.That(Field("Detail"), Does.Contain(detail));
+                if (next != null) Assert.That(Field("Next"), Does.Contain(next));
+            }
+            void Expire() => hud.GetType().GetMethod("AdvanceNotice", Internal).Invoke(hud, new object[] { 3f });
+            foreach (int seed in new[] { 1234, 5678, 9012 })
+            {
+                generator.GetType().GetField("seed", Internal).SetValue(generator, seed);
+                generator.GetType().GetMethod("Generate").Invoke(generator, null);
+                yield return null;
+                Assert.That(notices, Is.Empty);
+                Interact(Single("OutdoorSupplyCache"));
+                Expect("SUPPLIES COLLECTED", next: "Checkpoint");
+                Expire();
+                var reader = Single("CheckpointSecurityScanner");
+                Interact(reader);
+                Assert.That(notices, Is.Empty);
+                Interact(Single("SecurityAccessCard"));
+                Expect("CREDENTIAL ACQUIRED");
+                Interact(reader); Interact(reader);
+                Expect("CHECKPOINT SECURED", next: "Server");
+                Assert.That(notices.Count, Is.EqualTo(1));
+                Press("OpenMap");
+                yield return new WaitForSecondsRealtime(.2f);
+                Assert.That((float)hud.GetType().GetProperty("NoticeOpacity", Internal).GetValue(hud), Is.Zero);
+                Press("Play");
+                yield return Await(() => State == "Playing");
+                Expire();
+                var terminals = Object.FindObjectsByType(T("ServerTerminal"), FindObjectsSortMode.None)
+                    .Cast<Component>().OrderBy(t => t.name).ToArray();
+                Interact(terminals[1]);
+                Expect("SERVER 2 ONLINE", "1 / 3");
+                Interact(terminals[2]);
+                Expect("INCORRECT SEQUENCE", "0 / 3");
+                Interact(terminals[1]); Interact(terminals[1]); Interact(terminals[0]);
+                Expect("SERVER 1 ONLINE", "2 / 3");
+                Interact(terminals[2]);
+                Expect("SERVER NETWORK RESTORED", "3 / 3", "Control");
+                var panel = Single("ControlLockdownMission");
+                Interact(panel);
+                Assert.That(notices.Count, Is.EqualTo(1));
+                int count = 0;
+                foreach (Component item in Object.FindObjectsByType(T("LockdownSecuritySwitch"), FindObjectsSortMode.None))
+                {
+                    Interact(item); Interact(item);
+                    if (++count == 1) Expire(); // The Server completion has priority over partial progress.
+                    Expect(count == 3 ? "OVERRIDE AUTHORIZED" : "SECURITY SUBSYSTEM DISABLED", $"{count} / 3");
+                }
+                Interact(panel); Interact(panel);
+                Expect("CONTROL SYSTEMS RESTORED", next: "Storage");
+                Expire();
+                count = 0;
+                foreach (Component item in Object.FindObjectsByType(T("PowerCellPickup"), FindObjectsSortMode.None))
+                {
+                    Interact(item); Interact(item);
+                    count++;
+                    Expect(count == 2 ? "GENERATOR READY" : "POWER CELL COLLECTED", $"{count} / 2");
+                }
+                Interact(Single("StoragePowerMission"));
+                Expect("GENERATOR ONLINE", next: "designated");
+                Assert.That(notices.Count, Is.EqualTo(1));
+            }
+        }
+
+        [UnityTest]
         public IEnumerator OutdoorVitalsFollowRealDamageAndRecovery()
         {
             yield return StartMission();
@@ -184,6 +263,10 @@ namespace ShiftFour.Tests
             var health = player.GetComponent(T("Health"));
             var camera = player.GetComponentInChildren<Camera>();
             Interact(Single("OutdoorSupplyCache"));
+            Interact(Single("SecurityAccessCard"));
+            var reader = Single("CheckpointSecurityScanner");
+            Interact(reader);
+            Assert.That(reader.GetType().GetProperty("IsVerifying", Internal).GetValue(reader), Is.True);
             Vector3 root = player.transform.position;
             float eyeHeight = camera.transform.position.y;
             Assert.That(Subscriptions(health, "Died"), Is.EqualTo(1));
@@ -204,9 +287,13 @@ namespace ShiftFour.Tests
         }
 
         [UnityTest]
-        public IEnumerator OnlyRealExtractionYieldsVictory([ValueSource(nameof(RestartChoices))] bool replay)
+        public IEnumerator OnlyRealExtractionYieldsVictory([Values(1234, 5678, 9012)] int seed)
         {
             yield return StartMission();
+            var generator = Single("WorldGenerator");
+            generator.GetType().GetField("seed", Internal).SetValue(generator, seed);
+            generator.GetType().GetMethod("Generate").Invoke(generator, null);
+            yield return null;
             var gate = Single("OpenWorldExtractionGate");
             var mission = Single("OpenWorldMissionManager");
             Assert.That(Subscriptions(mission, "Extracted"), Is.EqualTo(1));
@@ -239,11 +326,85 @@ namespace ShiftFour.Tests
                 Damage(world.Find(path).GetComponentInChildren(T("Health")));
             }
             Assert.That(Read(mission, "DronesDefeated"), Is.EqualTo(3));
+            var player = Single("PlayerController");
+            var capsule = player.GetComponent<CharacterController>();
+            var camera = player.GetComponentInChildren<Camera>();
+            var shutter = gate.transform.Find("Extraction shutter");
+            var solid = shutter.GetComponentInChildren<BoxCollider>();
+            capsule.enabled = false;
+            player.transform.position = gate.transform.TransformPoint(new Vector3(0, .9f, -2.4f));
+            capsule.enabled = true;
+            player.GetType().GetMethod("ApplyCameraPose").Invoke(player, null);
+            camera.transform.LookAt(gate.transform.TransformPoint(Vector3.up * 2f));
+            Vector3 eye = camera.transform.localPosition;
+            Quaternion rotation = camera.transform.localRotation;
+            int mask = camera.cullingMask;
+            float originalFog = RenderSettings.fogDensity;
+            float fov = camera.fieldOfView;
+            var hp = player.GetComponent(T("Health"));
+            object health = Read(hp, "Current");
+            Physics.SyncTransforms();
+            Assert.That(Physics.Raycast(camera.transform.position, camera.transform.forward, out var hit,
+                3f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore), Is.True);
+            Assert.That(hit.collider.GetComponentInParent(gate.GetType()), Is.SameAs(gate));
+            Assert.That(gate.GetComponentsInChildren<Light>().All(lamp => lamp.color.g > lamp.color.r), Is.True);
+
             Interact(gate); Interact(gate);
             Assert.That(Read(mission, "Escaped"), Is.True);
+            Assert.That(State, Is.EqualTo("Ending"));
+            var timeAtExtraction = Menu.GetType().GetProperty("ActiveTime", Internal).GetValue(Menu);
+            Assert.That(Cursor.visible, Is.False);
+            Press("Pause"); Press("OpenMap"); Press("OpenMissions");
+            Assert.That(State, Is.EqualTo("Ending"));
+            Assert.That(Read(player, "CanAct"), Is.False);
+            Assert.That(Time.timeScale, Is.Zero);
+            Assert.That(shutter.localPosition.y, Is.Zero);
+            Assert.That(camera.cullingMask & (1 << 2), Is.Zero);
+            Assert.That(Object.FindObjectsByType<AudioListener>().Length, Is.EqualTo(1));
+            var sources = gate.GetComponentsInChildren<AudioSource>().Where(a => a.ignoreListenerPause).ToArray();
+            Assert.That(sources.Length, Is.EqualTo(2));
+            Assert.That(sources.Single(a => a.name == "Extraction score").clip, Is.Not.Null);
+            yield return Await(() => shutter.localPosition.y > .1f);
+            Assert.That(shutter.localPosition.y, Is.LessThan(4f));
+            Physics.SyncTransforms();
+            Assert.That(solid.bounds.min.y, Is.EqualTo(gate.transform.position.y + shutter.localPosition.y).Within(.01f));
+
+            if (seed == 9012)
+            {
+                generator.GetType().GetMethod("Generate").Invoke(generator, null);
+                yield return null;
+                Assert.That(State, Is.EqualTo("Playing"));
+                Assert.That(Time.timeScale, Is.EqualTo(.75f));
+                Assert.That(Read(player, "CanAct"), Is.True);
+                Assert.That(camera.cullingMask, Is.EqualTo(mask));
+                Assert.That(Single("OpenWorldExtractionGate").transform.Find("Extraction shutter").localPosition.y, Is.Zero);
+                yield break;
+            }
+            if (seed == 5678) Menu.GetType().GetMethod("FinishEnding", Internal).Invoke(Menu, null);
+            else
+            {
+                yield return Await(() => (float)Menu.GetType().GetProperty("EndingTime", Internal).GetValue(Menu) > 8.1f);
+                foreach (Transform site in world.Find("Buildings"))
+                {
+                    var point = camera.WorldToViewportPoint(site.position);
+                    Assert.That(point.z, Is.Positive);
+                    Assert.That(point.x, Is.InRange(0f, 1f));
+                    Assert.That(point.y, Is.InRange(0f, 1f));
+                }
+                yield return Await(() => State == "Victory");
+            }
             Assert.That(State, Is.EqualTo("Victory"));
-            Damage(Single("PlayerController").GetComponent(T("Health")));
-            yield return VerifyResultNavigation("Victory", replay);
+            Assert.That(shutter.localPosition.y, Is.EqualTo(4f));
+            Assert.That(camera.cullingMask, Is.EqualTo(mask));
+            Assert.That(camera.fieldOfView, Is.EqualTo(fov));
+            Assert.That(RenderSettings.fogDensity, Is.EqualTo(originalFog));
+            Assert.That(Menu.GetType().GetProperty("ActiveTime", Internal).GetValue(Menu), Is.EqualTo(timeAtExtraction));
+            Assert.That(camera.transform.localPosition, Is.EqualTo(eye));
+            Assert.That(Quaternion.Angle(camera.transform.localRotation, rotation), Is.LessThan(.1f));
+            Assert.That(Read(hp, "Current"), Is.EqualTo(health));
+            yield return null;
+            Assert.That(sources.All(a => a == null), Is.True);
+            yield return VerifyResultNavigation("Victory", seed == 1234);
         }
 
         private static IEnumerator VerifyResultNavigation(string result, bool retry)

@@ -58,8 +58,11 @@ namespace ShiftFour
         }
         public bool IsReady => BuildingMissionsCompleted == RequiredMissions && DronesDefeated == RequiredDrones;
         internal event System.Action Extracted;
+        internal event System.Action DesignatedTargetDefeated;
         public bool Escaped { get; private set; }
         public string Notice => !IsReady && Time.unscaledTime < noticeUntil ? notice : string.Empty;
+
+        internal OpenWorldExtractionGate Gate => gate;
 
         internal void BindGate(OpenWorldExtractionGate extractionGate) => gate = extractionGate;
 
@@ -122,11 +125,15 @@ namespace ShiftFour
             previousCursorVisibility = Cursor.visible;
             suspendedPlayer = true;
             player.enabled = false;
-            Cursor.lockState = CursorLockMode.None;
-            Cursor.visible = true;
             if (gate != null) gate.Refresh();
             Debug.Log(VictoryMessage, this);
-            Extracted?.Invoke();
+            if (Extracted != null) Extracted.Invoke();
+            else
+            {
+                gate?.SetOpening(1f);
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+            }
         }
 
         internal string RemainingObjectives()
@@ -169,6 +176,7 @@ namespace ShiftFour
 
         private void DroneDefeated(Health _)
         {
+            DesignatedTargetDefeated?.Invoke();
             if (gate != null) gate.Refresh();
         }
     }
