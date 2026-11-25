@@ -123,7 +123,7 @@ namespace ShiftFour.Tests
             Assert.That(Field(player, "walkSpeed").GetValue(player), Is.EqualTo(5f));
             Assert.That(PlayerWeaponTestActions.Data(player, "Damage"), Is.EqualTo(22f));
             Assert.That(PlayerWeaponTestActions.Data(player, "FireInterval"), Is.EqualTo(.4f));
-            Assert.That(Get(PlayerWeaponTestActions.Definition(player), "MagazineCapacity"), Is.EqualTo(12));
+            Assert.That(Get(PlayerWeaponTestActions.Definition(player), "MagazineCapacity"), Is.EqualTo(20));
             Assert.That(Maximum(player), Is.EqualTo(100f * PlayerWeaponTestActions.CombatMultiplier));
         }
 

@@ -106,7 +106,7 @@ namespace ShiftFour.Tests
             Assert.That(PlayerWeaponTestActions.Data(player, "Range"), Is.EqualTo(30f));
             Assert.That(PlayerWeaponTestActions.Data(player, "FireInterval"), Is.EqualTo(.4f));
             Assert.That(Fire(), Is.True); object state = State; float next = (float)Get(state, "NextShotTime");
-            Call(weapons, "Initialize", player);
+            Call(weapons, "Initialize", player, true);
             Assert.That(State, Is.SameAs(state)); Assert.That((float)Get(State, "NextShotTime"), Is.EqualTo(next));
             Assert.That(Fire(), Is.False);
             yield return null;
@@ -148,8 +148,8 @@ namespace ShiftFour.Tests
             Assert.That((bool)Field(probe.LastShot, "HasHit"), Is.True);
             Assert.That(((RaycastHit)Field(probe.LastShot, "Hit")).collider, Is.SameAs(cover.GetComponent<BoxCollider>()));
             Assert.That(noise.Shots, Is.EqualTo(1));
-            Assert.That(Get(State, "RoundsInMagazine"), Is.EqualTo(11));
-            Assert.That(Fire(), Is.False); Assert.That(Get(State, "RoundsInMagazine"), Is.EqualTo(11));
+            Assert.That(Get(State, "RoundsInMagazine"), Is.EqualTo(19));
+            Assert.That(Fire(), Is.False); Assert.That(Get(State, "RoundsInMagazine"), Is.EqualTo(19));
             yield return null;
         }
 
@@ -158,7 +158,7 @@ namespace ShiftFour.Tests
             target.transform.position = camera.transform.position + Vector3.forward * 40f; Physics.SyncTransforms();
             var probe = Probe(target); Assert.That(Fire(), Is.True); Assert.That(Fire(), Is.False);
             Assert.That(HP, Is.EqualTo(100f)); Assert.That(probe.Damages, Is.Zero);
-            Assert.That(Get(State, "RoundsInMagazine"), Is.EqualTo(11));
+            Assert.That(Get(State, "RoundsInMagazine"), Is.EqualTo(19));
             Assert.That((bool)Field(probe.LastShot, "HasHit"), Is.False);
             Assert.That(probe.Shots, Is.EqualTo(1)); Assert.That(noise.Noises, Is.EqualTo(1)); Assert.That(noise.Shots, Is.EqualTo(1));
             yield return null;
@@ -354,7 +354,7 @@ namespace ShiftFour.Tests
             Call(weapons, "CancelReload"); yield return null;
             Assert.That(Vector3.Distance(magazine.localPosition, restMagazine), Is.LessThan(.0001f));
             Assert.That(Vector3.Distance(pivot.localPosition, restPivot), Is.LessThan(.0001f));
-            Assert.That(Get(State, "RoundsInMagazine"), Is.EqualTo(11));
+            Assert.That(Get(State, "RoundsInMagazine"), Is.EqualTo(19));
         }
 
         [UnityTest] public IEnumerator Viewmodel_CannotInterceptRayEvenWhenNestedColliderIsAddedAfterBinding()

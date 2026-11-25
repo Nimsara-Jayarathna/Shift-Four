@@ -61,6 +61,19 @@ namespace ShiftFour
             support.Solve(supportHandTarget.position + supportOffset, supportHandTarget.rotation, supportElbowHint.position, maximumWristDeviation, configuredPronation, configuredPronation > 0 ? 1 : 0);
         }
 
+        internal void SetOutdoorPistolGrip()
+        {
+            // Seat the palm pads a few millimetres farther onto the authored backstrap.
+            rightHandTarget.localPosition += new Vector3(-.003f, .002f, 0);
+            supportHandTarget.localPosition += new Vector3(.004f, .002f, .002f);
+        }
+
+        internal void PoseKnifeWrist(Vector3 position, Quaternion rotation, float turn)
+        {
+            if (!Initialize()) return;
+            dominant.Solve(position, rotation, rightElbowHint.position, maximumWristDeviation, 32f * turn);
+        }
+
         public void ApplyMagazinePose(Transform magazineGrip, float contactWeight, float forearmTwistLimit, float handClearance)
         {
             if (!Initialize()) return;
@@ -70,6 +83,15 @@ namespace ShiftFour
             position += transform.TransformVector(Vector3.left) * (handClearance * Mathf.Sin(weight * Mathf.PI));
             Quaternion rotation = weight > 0 ? Quaternion.Slerp(supportHandTarget.rotation, magazineGrip.rotation, weight) : supportHandTarget.rotation;
             support.Solve(position, rotation, supportElbowHint.position, maximumWristDeviation, forearmTwistLimit * weight, weight);
+        }
+
+        // Used by a separate planting rig, so the equipped weapon's authored pose is untouched.
+        public void ApplyPlantingPose(Vector3 leftPosition, Quaternion leftRotation,
+            Vector3 rightPosition, Quaternion rightRotation)
+        {
+            if (!Initialize()) return;
+            support.Solve(leftPosition, leftRotation, supportElbowHint.position, 55f, 45f, 1f);
+            dominant.Solve(rightPosition, rightRotation, rightElbowHint.position, 55f, 45f, 1f);
         }
 
         private sealed class Arm

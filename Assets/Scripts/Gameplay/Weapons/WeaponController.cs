@@ -42,7 +42,7 @@ namespace ShiftFour
 
         private bool CanOperate => isActiveAndEnabled && owner != null && owner.CanAct;
 
-        public void Initialize(PlayerController player)
+        public void Initialize(PlayerController player, bool equipInitialWeapon = true)
         {
             if (player == null) throw new ArgumentNullException(nameof(player));
             if (player.gameObject != gameObject) throw new ArgumentException("WeaponController must share its player's root.", nameof(player));
@@ -55,7 +55,7 @@ namespace ShiftFour
             health.Died += OnOwnerDied;
             if (initialWeapon == null) initialWeapon = Resources.Load<WeaponDefinition>("Weapons/FNFiveSeven");
             if (initialWeapon == null) { fallback = WeaponDefinition.CreateFallback(); initialWeapon = fallback; }
-            Activate(initialWeapon);
+            if (equipInitialWeapon) Activate(initialWeapon);
             mount = GetComponent<FirstPersonWeaponMount>();
             if (mount == null) mount = gameObject.AddComponent<FirstPersonWeaponMount>();
             mount.Initialize(this, player);
@@ -121,6 +121,22 @@ namespace ShiftFour
             return true;
         }
 
+        internal void Holster()
+        {
+            if (ActiveWeapon == null) return;
+            CancelReload();
+            ActiveWeapon = null;
+            dryFireUntil = 0f;
+            Notify(WeaponEquipped, (WeaponDefinition)null);
+        }
+
+        internal void ClearLoadout()
+        {
+            Holster();
+            states.Clear();
+            nextDryFireTime = 0f;
+        }
+
         private void Activate(WeaponDefinition definition)
         {
             changingWeapon = true;
@@ -164,6 +180,7 @@ namespace ShiftFour
 
         private void Update()
         {
+            if (owner != null && owner.MenuBlocksInput) return; // Preserve an in-progress reload while the session clock is paused.
             if (!CanOperate && !firing) CancelReload();
             else if (!firing)
             {

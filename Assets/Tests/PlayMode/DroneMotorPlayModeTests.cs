@@ -114,6 +114,99 @@ namespace ShiftFour.Tests
             Assert.That(agent.stoppingDistance, Is.EqualTo(1f));
         }
 
+        [UnityTest]
+        public IEnumerator PermanentPhysicalObstruction_ExhaustsRetriesAndRemovalRearms()
+        {
+            drone.AddComponent<CapsuleCollider>().center = Vector3.up * 1.6f;
+            Set("body", drone.AddComponent(Type.GetType("ShiftFour.DroneBody, Assembly-CSharp", true)));
+            var beam = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            beam.transform.SetParent(root.transform);
+            beam.transform.position = Offset + new Vector3(3f, 2.3f, 0f);
+            beam.transform.localScale = new Vector3(.3f, .5f, 20f);
+            Physics.SyncTransforms();
+            Vector3 end = Vector3.right * 7f;
+            Go(end);
+            float until = Time.time + 12f;
+            while (Time.time < until && (State != "Blocked" || (int)Get("retryCount") < 2))
+                yield return null;
+            Assert.That(State, Is.EqualTo("Blocked"));
+            Assert.That(Get("blockedBy").ToString(), Is.EqualTo("PhysicalObstruction"));
+            Assert.That((int)Get("retryCount"), Is.EqualTo(2));
+            var exhausted = Get("route");
+            Go(end);
+            yield return new WaitForSeconds(1f);
+            Assert.That(Get("route"), Is.SameAs(exhausted), "Repeated intent must not renew retries.");
+            Assert.That(drone.transform.position.x, Is.LessThan(Offset.x + 1.5f));
+            Object.Destroy(beam);
+            yield return WaitForState("Arrived");
+        }
+
+        [UnityTest]
+        public IEnumerator StraightIntermediateLeg_CarriesSpeedAndRestoresFinalBraking()
+        {
+            ConfigureGraph(new[] { Vector3.zero, Vector3.right * 3f, Vector3.right * 7f });
+            Go(Vector3.right * 7f);
+            yield return WaitForState("Following");
+            Vector3 projectedGoal = agent.destination;
+            Assert.That(projectedGoal.x, Is.EqualTo(Offset.x + 7f).Within(.02f));
+            Assert.That(projectedGoal.z, Is.EqualTo(Offset.z).Within(.02f));
+            var route = (List<Vector3>)Get("route");
+            int intermediate = (int)Get("step");
+            Assert.That(route[intermediate], Is.EqualTo(Offset + Vector3.right * 3f));
+            float until = Time.time + 6f;
+            while ((int)Get("step") == intermediate && Time.time < until) yield return null;
+            Assert.That((int)Get("step"), Is.EqualTo(intermediate + 1));
+            Assert.That((float)motorType.GetProperty("ActualSpeed").GetValue(motor), Is.GreaterThan(1.5f));
+            Assert.That(agent.autoBraking, Is.True);
+            Assert.That(drone.transform.position.x, Is.InRange(Offset.x + 2.65f, Offset.x + 3.35f));
+            yield return WaitForState("Arrived");
+            Assert.That(Vector3.Distance(drone.transform.position, Offset + Vector3.right * 7f), Is.LessThanOrEqualTo(1.06f));
+        }
+
+        [UnityTest]
+        public IEnumerator TemporaryDroneBlock_PreservesRouteAndResumes()
+        {
+            var bodyType = Type.GetType("ShiftFour.DroneBody, Assembly-CSharp", true);
+            drone.AddComponent<CapsuleCollider>().center = Vector3.up * 1.6f;
+            Set("body", drone.AddComponent(bodyType));
+            var blocker = new GameObject("Neighbouring drone");
+            blocker.transform.SetParent(root.transform);
+            blocker.transform.position = Offset + Vector3.right * 3f;
+            blocker.AddComponent<CapsuleCollider>().center = Vector3.up * 1.6f;
+            blocker.AddComponent(bodyType);
+            blocker.GetComponent<NavMeshAgent>().enabled = false;
+            Physics.SyncTransforms();
+
+            Go(Vector3.right * 7f);
+            yield return WaitForState("Following");
+            var route = Get("route");
+            yield return new WaitForSeconds(3f);
+            Assert.That(drone.transform.position.x, Is.LessThan(Offset.x + 1.25f));
+            Assert.That(Get("route"), Is.SameAs(route));
+            blocker.transform.position += Vector3.forward * 4f;
+            Physics.SyncTransforms();
+            yield return WaitForState("Arrived");
+        }
+
+        [UnityTest]
+        public IEnumerator ClosingGateInvalidatesActiveRouteBeforeNativeCarving()
+        {
+            Vector3 end = Vector3.right * 7f;
+            ConfigureGraph(new[] { Vector3.zero, end }, 2);
+            GraphCall("SetGateOpen", 2, true);
+            Go(end);
+            yield return WaitForState("Following");
+            yield return new WaitForSeconds(.35f);
+            Vector3 before = drone.transform.position;
+            GraphCall("SetGateOpen", 2, false);
+            yield return WaitForState("Blocked");
+            yield return new WaitForSeconds(.35f);
+            Assert.That(HasRoute, Is.False);
+            Assert.That(Vector3.Distance(before, drone.transform.position), Is.LessThan(.2f));
+            GraphCall("SetGateOpen", 2, true);
+            yield return WaitForState("Arrived");
+        }
+
 #if UNITY_EDITOR
         [UnityTest]
         public IEnumerator Combat_NoSafeCandidateHoldsAndRecoversWithoutChasingPlayerRoot()
@@ -596,6 +689,8 @@ namespace ShiftFour.Tests
             var health = playerObject.GetComponent(healthType);
             brainType.GetMethod("Start", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(brain, null);
             brainType.GetField("player", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(brain, player);
+            // This isolated fixture has no GameSession to bind the target and its health in Start.
+            brainType.GetField("playerHealth", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(brain, health);
             var see = brainType.GetMethod("CanSeePlayer", BindingFlags.NonPublic | BindingFlags.Instance);
             var fire = brainType.GetMethod("TryShoot", BindingFlags.NonPublic | BindingFlags.Instance);
             Physics.SyncTransforms();

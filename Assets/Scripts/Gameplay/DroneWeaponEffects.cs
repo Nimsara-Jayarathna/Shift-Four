@@ -13,10 +13,12 @@ namespace ShiftFour
         private readonly GameObject rig, flash;
         private readonly Renderer flashRenderer;
         private readonly Light pulse;
-        private readonly Material material;
+        private static readonly SharedDroneMaterial SharedMaterial = new SharedDroneMaterial(CreateMaterial);
+        private Material material;
         private readonly LineRenderer tracer;
         private readonly LineRenderer[] sparks = new LineRenderer[8];
         private Vector3 origin, target, sparkOrigin, sparkNormal;
+        private bool outdoorPresentation;
         private float shotAge = 100f, sparkAge = 100f, flashDuration = .11f, tracerDuration = .13f;
         public int ShotCount { get; private set; }
         public bool FlashVisible => flashRenderer.enabled;
@@ -28,10 +30,7 @@ namespace ShiftFour
         {
             rig = new GameObject("Drone reusable weapon and impact effects");
             rig.transform.SetParent(parent, false);
-            Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
-            if (shader == null) shader = Shader.Find("Sprites/Default");
-            material = new Material(shader) { name = "Drone effects (runtime)", hideFlags = HideFlags.DontSave };
-            material.SetColor(material.HasProperty("_BaseColor") ? "_BaseColor" : "_Color", new Color(2f, 3f, 4f));
+            material = SharedMaterial.Acquire();
             flash = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             flash.name = "Runtime gimballed muzzle";
             flash.transform.SetParent(rig.transform, false);
@@ -55,6 +54,18 @@ namespace ShiftFour
             line.startColor = line.endColor = color;
             line.shadowCastingMode = ShadowCastingMode.Off; line.receiveShadows = false;
             line.enabled = false; return line;
+        }
+
+        internal void ConfigureOutdoorPresentation()
+        {
+            outdoorPresentation = true;
+            // URP Unlit does not reliably multiply by LineRenderer vertex colors.
+            int property = Shader.PropertyToID(material.HasProperty("_BaseColor") ? "_BaseColor" : "_Color");
+            var tint = new MaterialPropertyBlock();
+            tint.SetColor(property, new Color(.45f, 1.5f, 1.8f));
+            tracer.SetPropertyBlock(tint);
+            tint.SetColor(property, new Color(2.1f, .72f, .16f));
+            foreach (var spark in sparks) spark.SetPropertyBlock(tint);
         }
 
         public void Fire(Vector3 acceptedOrigin, Vector3 acceptedHit, float flashSeconds, float tracerSeconds)
@@ -85,6 +96,7 @@ namespace ShiftFour
 
         public void Tick(float dt)
         {
+            if (shotAge >= Mathf.Max(flashDuration, tracerDuration) && sparkAge >= .35f) return;
             using var profileSample=EffectsProfile.Auto();
             shotAge += dt; sparkAge += dt;
             flashRenderer.enabled = shotAge < flashDuration;
@@ -92,6 +104,7 @@ namespace ShiftFour
             if (flashRenderer.enabled)
             {
                 float strength = 1f - shotAge / flashDuration;
+                if (outdoorPresentation) flash.transform.position = origin;
                 flash.transform.localScale = Vector3.one * (.09f + .12f * strength);
                 pulse.intensity = 1.5f * strength;
             }
@@ -117,10 +130,19 @@ namespace ShiftFour
             }
         }
 
+        private static Material CreateMaterial()
+        {
+            Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+            if (shader == null) shader = Shader.Find("Sprites/Default");
+            var material = new Material(shader) { name = "Drone effects (runtime)", hideFlags = HideFlags.DontSave };
+            material.SetColor(material.HasProperty("_BaseColor") ? "_BaseColor" : "_Color", new Color(2f, 3f, 4f));
+            return material;
+        }
+
         public void Dispose()
         {
             if (rig != null) Object.Destroy(rig);
-            if (material != null) Object.Destroy(material);
+            SharedMaterial.Release(ref material);
         }
     }
 }

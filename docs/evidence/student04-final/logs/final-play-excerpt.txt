@@ -1,0 +1,5 @@
+Open World: generated seed 1234 (200 × 200 m).
+Open World: generated seed 5678 (200 × 200 m).
+Open World: generated seed 9012 (200 × 200 m).
+Saving results to: /tmp/sf-f5-final-play.xml
+Test run completed. Exiting with code 2 (Failed). One or more tests failed.

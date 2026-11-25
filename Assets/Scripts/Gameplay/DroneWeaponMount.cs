@@ -6,9 +6,11 @@ namespace ShiftFour
     /// <summary>Small collider-free gimbal. Its muzzle is also the gameplay shot origin.</summary>
     public sealed class DroneWeaponMount : System.IDisposable
     {
-        private readonly Transform root, mount;
+        private readonly Transform root, mount, housing;
+        private static readonly Vector3 HousingRest = new Vector3(0f, 0f, -.025f);
         private readonly Vector3 pivotOffset;
-        private readonly Material material;
+        private static readonly SharedDroneMaterial SharedMaterial = new SharedDroneMaterial(CreateMaterial);
+        private Material material;
         private readonly float length;
         public Vector3 PivotPosition => root.TransformPoint(pivotOffset);
         public Vector3 MuzzlePosition => mount.position + mount.forward * length;
@@ -24,18 +26,14 @@ namespace ShiftFour
                 .65f * scale);
             mount = new GameObject("Drone weapon gimbal").transform;
             mount.SetParent(visual, false);
-            Shader shader = Shader.Find("Universal Render Pipeline/Lit");
-            material = new Material(shader) { name = "Drone barrel steel (runtime)", hideFlags = HideFlags.DontSave };
-            material.SetColor("_BaseColor", new Color(.12f, .16f, .19f));
-            material.SetFloat("_Metallic", .7f);
-            material.SetFloat("_Smoothness", .4f);
-            Part("Weapon housing", PrimitiveType.Cube, new Vector3(0, 0, -.025f), new Vector3(.15f, .12f, .15f));
+            material = SharedMaterial.Acquire();
+            housing = Part("Weapon housing", PrimitiveType.Cube, HousingRest, new Vector3(.15f, .12f, .15f));
             Part("Short barrel", PrimitiveType.Cylinder, new Vector3(0, 0, .125f), new Vector3(.075f, .125f, .075f));
             Part("Muzzle collar", PrimitiveType.Cylinder, new Vector3(0, 0, .265f), new Vector3(.10f, .015f, .10f));
             AimAt(null);
         }
 
-        private void Part(string name, PrimitiveType type, Vector3 position, Vector3 scale)
+        private Transform Part(string name, PrimitiveType type, Vector3 position, Vector3 scale)
         {
             var part = GameObject.CreatePrimitive(type);
             part.name = name;
@@ -49,7 +47,11 @@ namespace ShiftFour
             var renderer = part.GetComponent<Renderer>();
             renderer.sharedMaterial = material;
             renderer.shadowCastingMode = ShadowCastingMode.On;
+            return part.transform;
         }
+
+        // Only the receiver slides. The accepted firing ray and muzzle collar stay aligned.
+        internal void SetRecoil(float amount) => housing.localPosition = HousingRest + Vector3.back * (.085f * amount);
 
         public void AimAt(Vector3? target)
         {
@@ -60,10 +62,20 @@ namespace ShiftFour
             // Parent model scale already supplies the requested 10% size reduction.
         }
 
+        private static Material CreateMaterial()
+        {
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+            var material = new Material(shader) { name = "Drone barrel steel (runtime)", hideFlags = HideFlags.DontSave };
+            material.SetColor("_BaseColor", new Color(.12f, .16f, .19f));
+            material.SetFloat("_Metallic", .7f);
+            material.SetFloat("_Smoothness", .4f);
+            return material;
+        }
+
         public void Dispose()
         {
             if (mount != null) Object.Destroy(mount.gameObject);
-            if (material != null) Object.Destroy(material);
+            SharedMaterial.Release(ref material);
         }
     }
 }

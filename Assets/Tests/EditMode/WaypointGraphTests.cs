@@ -304,6 +304,58 @@ namespace ShiftFour.Tests
 
         private int Version => (int)graphType.GetProperty("Version").GetValue(graph);
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public void OffNodeEndpoint_UsesReachableAttachmentWhenNearestIsIsolated(bool reverse)
+        {
+            BuildFloor(false);
+            var isolated = Vector3.zero;
+            var entry = Vector3.right * 3f;
+            var end = Vector3.right * 7f;
+            var endpoint = Vector3.right * .5f;
+            Configure(new[] { isolated, entry, end }, Edge(1, 2));
+            AssertConnected(endpoint, isolated, true);
+            AssertConnected(endpoint, entry, true);
+            CollectionAssert.AreEqual(reverse ? new[] { Offset + entry, Offset + endpoint }
+                : new[] { Offset + entry, Offset + end },
+                reverse ? Route(end, endpoint) : Route(endpoint, end));
+        }
+
+        [Test]
+        public void AlternateAttachment_CannotJumpClosedGateBeforeNavMeshCarves()
+        {
+            BuildFloor(false);
+            var entry = Vector3.right * 3f;
+            var end = Vector3.right * 7f;
+            var endpoint = Vector3.right * .5f;
+            Configure(new[] { Vector3.zero, entry, end }, Edge(0, 1, 2), Edge(1, 2));
+            AssertConnected(endpoint, entry, true);
+            Assert.That(Route(endpoint, end), Is.Empty);
+            Invoke("SetGateOpen", 2, true);
+            CollectionAssert.AreEqual(new[] { Offset, Offset + entry, Offset + end }, Route(endpoint, end));
+        }
+
+        [Test]
+        public void SearchTrace_RecordsRealCostsAndParentsWithoutChangingRoute()
+        {
+            var middle = Vector3.right * 3f;
+            var destination = Vector3.right * 7f;
+            Configure(new[] { Vector3.zero, middle, destination }, Edge(0, 1), Edge(1, 2));
+            var traceType = graphType.GetNestedType("SearchTrace", BindingFlags.NonPublic);
+            object trace = Activator.CreateInstance(traceType, nonPublic: true);
+            const BindingFlags members = BindingFlags.NonPublic | BindingFlags.Instance;
+            var result = graphType.GetMethod("FindRouteWithTrace", members)
+                .Invoke(graph, new[] { (object)Offset, Offset + destination, trace });
+            CollectionAssert.AreEqual(Route(Vector3.zero, destination), (List<Vector3>)result);
+            var visits = (System.Collections.IList)traceType.GetField("Visits", members).GetValue(trace);
+            Assert.That(visits.Count, Is.EqualTo(3));
+            var visit = visits[1];
+            Assert.That(visit.GetType().GetField("Node", members).GetValue(visit), Is.EqualTo(1));
+            Assert.That(visit.GetType().GetField("Parent", members).GetValue(visit), Is.EqualTo(0));
+            Assert.That(visit.GetType().GetField("G", members).GetValue(visit), Is.EqualTo(3f));
+            Assert.That(visit.GetType().GetField("H", members).GetValue(visit), Is.EqualTo(4f));
+        }
+
         private object Invoke(string method, params object[] args)
             => graphType.GetMethod(method).Invoke(graph, args);
 

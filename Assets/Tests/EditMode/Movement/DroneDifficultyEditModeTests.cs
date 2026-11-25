@@ -92,8 +92,10 @@ namespace ShiftFour.Tests
         [Test] public void RuntimeSettings_AreACopyAndDoNotMutateSharedAsset()
         {
             Object profile = Profile("Guard"); string before = JsonUtility.ToJson(profile);
-            object copy = Settings(profile); Set(copy, "maximumHealth", 999f);
-            Assert.That(Value(Settings(profile), "maximumHealth"), Is.EqualTo(150f));
+            object copy = Settings(profile);
+            float originalHealth = Value(copy, "maximumHealth");
+            Set(copy, "maximumHealth", originalHealth + 1f);
+            Assert.That(Value(Settings(profile), "maximumHealth"), Is.EqualTo(originalHealth));
             Assert.That(JsonUtility.ToJson(profile), Is.EqualTo(before));
         }
 

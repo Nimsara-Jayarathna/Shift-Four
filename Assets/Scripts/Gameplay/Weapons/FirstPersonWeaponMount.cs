@@ -15,6 +15,7 @@ namespace ShiftFour
         private readonly FirstPersonEquipTransition transition = new FirstPersonEquipTransition();
         private Vector3 modelRestPosition;
         private Quaternion modelRestRotation;
+        private bool deferDraw, requireReadyToFire;
         private bool wantsVisible = true, wasOperational, refreshing, requesting, notifying;
         private WeaponPresentationState notifiedState = WeaponPresentationState.Hidden;
         public Transform Socket { get; private set; }
@@ -25,10 +26,10 @@ namespace ShiftFour
         public float EquipDuration => motion != null ? motion.EquipDuration : 0;
         public float UnequipDuration => motion != null ? motion.UnequipDuration : 0;
         public event Action<WeaponPresentationState> TransitionChanged;
-        private bool Operational => isActiveAndEnabled && weapons != null && weapons.isActiveAndEnabled && player != null && player.CanAct && player.ViewCamera != null;
+        private bool Operational => isActiveAndEnabled && weapons != null && weapons.isActiveAndEnabled && player != null && player.CanPresentWeapon && player.ViewCamera != null;
         public bool IsReady => Operational && wantsVisible && displayed == weapons.ActiveWeapon?.Definition && TransitionState == WeaponPresentationState.Ready;
         public bool AllowsFiring => IsReady || (Operational && wantsVisible && displayed == weapons.ActiveWeapon?.Definition &&
-            TransitionState == WeaponPresentationState.Equipping && motion != null && !motion.BlockFiringDuringEquip);
+            TransitionState == WeaponPresentationState.Equipping && motion != null && !requireReadyToFire && !motion.BlockFiringDuringEquip);
         public bool AllowsReload => IsReady;
         private readonly RaycastHit[] obstructionHits = new RaycastHit[16];
 
@@ -55,7 +56,20 @@ namespace ShiftFour
             wantsVisible = true; Refresh(); return true;
         }
 
-        private void OnEquipped(WeaponDefinition _) { wantsVisible = true; Refresh(); }
+        // Grant the weapon immediately while another viewmodel finishes lowering.
+        internal bool EquipLowered(WeaponDefinition definition)
+        {
+            deferDraw = true;
+            try { return weapons.Equip(definition); }
+            finally { deferDraw = false; }
+        }
+
+        private void OnEquipped(WeaponDefinition _)
+        {
+            requireReadyToFire = deferDraw;
+            wantsVisible = !deferDraw;
+            Refresh();
+        }
         private void OnEnable() => Refresh();
         private void LateUpdate() => Refresh();
 

@@ -1,0 +1,22 @@
+component,workload,calls,total_ms,allocation_events,events_per_call
+AStar,all-open graph node0 to node4 (73m),100,0.615800,700,7.000
+InterceptorBrain.Motor,same-frame live Update,100,0.252200,0,0.000
+InterceptorBrain.Body,same-frame live LateUpdate,100,0.220300,0,0.000
+InterceptorBrain.BodyQueries,raised overlap and 0.1m sweep (nonzero displacement),100,32.490900,0,0.000
+InterceptorBrain.Animation,same-frame live animation,100,0.540800,0,0.000
+InterceptorBrain.Decision,same timestamp hidden target; warmed caches,100,33.448000,1000,10.000
+FlankerBrain.Motor,same-frame live Update,100,0.315500,0,0.000
+FlankerBrain.Body,same-frame live LateUpdate,100,0.202200,0,0.000
+FlankerBrain.BodyQueries,raised overlap and 0.1m sweep (nonzero displacement),100,33.453700,0,0.000
+FlankerBrain.Animation,same-frame live animation,100,0.461600,0,0.000
+FlankerBrain.Decision,same timestamp hidden target; warmed caches,100,38.176100,3100,31.000
+GuardBrain.Motor,same-frame live Update,100,0.251700,0,0.000
+GuardBrain.Body,same-frame live LateUpdate,100,0.233800,0,0.000
+GuardBrain.BodyQueries,raised overlap and 0.1m sweep (nonzero displacement),100,34.513900,0,0.000
+GuardBrain.Animation,same-frame live animation,100,0.435000,0,0.000
+GuardBrain.Decision,same timestamp hidden target; warmed caches,100,1.159900,500,5.000
+ScoutBrain.Motor,same-frame live Update,100,0.252200,0,0.000
+ScoutBrain.Body,same-frame live LateUpdate,100,0.195300,0,0.000
+ScoutBrain.BodyQueries,raised overlap and 0.1m sweep (nonzero displacement),100,30.786600,0,0.000
+ScoutBrain.Animation,same-frame live animation,100,0.398600,0,0.000
+ScoutBrain.Decision,same timestamp hidden target; warmed caches,100,0.254000,0,0.000

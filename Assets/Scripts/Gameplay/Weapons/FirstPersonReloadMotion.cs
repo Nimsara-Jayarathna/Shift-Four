@@ -33,14 +33,45 @@ namespace ShiftFour
         public Vector3 MagazineOffset { get; private set; }
         public Quaternion MagazineRotation { get; private set; } = Quaternion.identity;
 
+        private bool outdoorHandling;
+
+        internal void ConfigureOutdoorHandling(Transform pivot)
+        {
+            outdoorHandling = true;
+            // Put the pads around the lower magazine body, just above the floorplate.
+            if (magazineGripTarget != null && pivot != null)
+                magazineGripTarget.position += pivot.TransformVector(new Vector3(.007f, .019f, .003f));
+            accessPosition = new Vector3(-.038f, .056f, .034f);
+            accessRotation = new Vector3(7f, -12f, -19f);
+            exchangeRotation = new Vector3(6f, -7f, -10f);
+        }
+
         public void Evaluate(float progress)
         {
             float p = float.IsFinite(progress) ? Mathf.Clamp01(progress) : 0;
             float pose = Sample(access, p), swap = Sample(exchange, p);
             ContactWeight = Sample(handContact, p);
             PositionOffset = accessPosition * pose; RotationOffset = Quaternion.Euler(accessRotation * pose);
-            MagazineOffset = new Vector3(0, -withdrawalDistance, -withdrawalRearward) * Sample(withdrawal, p) + Vector3.down * (seatDistance * Sample(seat, p)) + exchangeOffset * swap;
+            float withdrawn = Sample(withdrawal, p);
+            MagazineOffset = new Vector3(0, -withdrawalDistance, -withdrawalRearward) * withdrawn + Vector3.down * (seatDistance * Sample(seat, p)) + exchangeOffset * swap;
             MagazineRotation = Quaternion.Euler(exchangeRotation * swap);
+            if (outdoorHandling)
+            {
+                // Drop into the workspace first, then lift the grip as the support hand takes the mag.
+                float dip = Mathf.Sin(Mathf.PI * Mathf.Clamp01(p / .25f));
+                PositionOffset += Vector3.down * (.027f * dip * dip);
+                PositionOffset += new Vector3(-.012f, .123f, .065f) * withdrawn;
+            }
+        }
+
+        internal void BlendToGrip(float blend)
+        {
+            float remaining = 1f - blend;
+            PositionOffset *= remaining;
+            RotationOffset = Quaternion.Slerp(Quaternion.identity, RotationOffset, remaining);
+            MagazineOffset *= remaining;
+            MagazineRotation = Quaternion.Slerp(Quaternion.identity, MagazineRotation, remaining);
+            ContactWeight *= remaining;
         }
 
         private void OnDisable() => Evaluate(0);

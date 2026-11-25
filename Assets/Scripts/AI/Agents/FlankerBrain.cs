@@ -9,6 +9,16 @@ namespace ShiftFour
     public sealed class FlankerBrain : DroneBrain
     {
         protected override bool OwnsSoundInvestigation => true;
+        protected override float VisionDistance => ambush?.Settings.Detection ?? base.VisionDistance;
+        protected override float AttackRange => ambush?.AttackRange ?? base.AttackRange;
+        protected override float ShotInterval => ambush?.Settings.ShotInterval ?? base.ShotInterval;
+        protected override float DamagePerShot => ambush?.ShotDamage ?? base.DamagePerShot;
+        protected override bool CanTarget(Vector3 position)
+            => ambush == null || (Player != null && Player.isActiveAndEnabled && ambush.CanObserve(this, position));
+        protected override bool ShouldResumePatrol(Vector3 targetPosition)
+            => ambush == null && base.ShouldResumePatrol(targetPosition);
+        protected override bool TryAuthorizeShot()
+            => ambush == null || ambush.AuthorizeShot(transform.position, transform.forward, Player.transform.position);
 
         protected override void MoveToDecision(DecisionOption choice, bool visible)
             => Motor.GoTo(choice.Destination);
@@ -29,18 +39,41 @@ namespace ShiftFour
         private FlankerPolicy policy;
         private FlankerRoutes routes;
         private WaypointGraph routeGraph;
+        private OutdoorFlankerAmbush ambush;
+        private CharacterController playerBody;
+        private NavMeshAgent ambushAgent;
         public FlankerPolicy Policy => policy;
         public FlankerRoutes Routes => routes;
         public string DecisionTrace { get; private set; } = "No decision";
+        internal bool IsAmbushWarning => Alive && ambush?.State == OutdoorFlankerAmbush.Phase.Warning;
+
+        internal void ConfigureAmbush(OutdoorFlankerAmbush zone, PlayerController target)
+        {
+            ambush = zone;
+            playerBody = target.GetComponent<CharacterController>();
+            ambushAgent = GetComponent<NavMeshAgent>();
+        }
 
         protected override DecisionOption Decide(bool visible, Vector3 playerPosition, float distance)
         {
+            if (ambush != null)
+            {
+                routes ??= new FlankerRoutes(this, NavigationGraph);
+                Vector3 movement = visible ? Vector3.ProjectOnPlane(playerBody.velocity, Vector3.up) : Vector3.zero;
+                if (visible && movement.sqrMagnitude < .36f) movement = ObservedVelocity;
+                var decision = ambush.Decide(this, routes, visible, playerPosition, movement,
+                    visible ? Player.transform.forward : Vector3.zero);
+                Motor.SetMovementMode(ambush.State is OutdoorFlankerAmbush.Phase.Flanking or OutdoorFlankerAmbush.Phase.Reposition
+                    ? DroneMovementMode.Chase : DroneMovementMode.Patrol);
+                DecisionTrace = decision.Name;
+                return decision;
+            }
             if (policy == null) policy = new FlankerPolicy(new FlankerSettings {
                 memorySeconds = memorySeconds, flankRadius = flankRadius, preferredRange = preferredAttackDistance,
                 lateralWeight = lateralWeight, firingWeight = firingLineWeight, rangeWeight = rangeWeight,
                 costWeight = routeCostWeight, commitSeconds = minimumCommitSeconds, switchMargin = switchMargin,
                 cooldownSeconds = failedCandidateCooldown, stuckSeconds = noProgressSeconds });
-            var graph = GameSession.Instance != null ? GameSession.Instance.Graph : null;
+            var graph = NavigationGraph;
             if (graph != routeGraph || routes == null) { routeGraph = graph; routes = new FlankerRoutes(this, graph); }
             routes.Begin(Home);
             SoundObservation heard = default;
@@ -62,6 +95,20 @@ namespace ShiftFour
             }
             return choice;
         }
+
+        private void LateUpdate()
+        {
+            if (HasPrototypeTempo || ambush == null || !Alive || Player == null ||
+                ambush.State is not (OutdoorFlankerAmbush.Phase.Warning or OutdoorFlankerAmbush.Phase.Attack)) return;
+            Vector3 heading = Vector3.ProjectOnPlane(Player.transform.position - transform.position, Vector3.up);
+            if (heading.sqrMagnitude > .01f)
+                transform.rotation = Quaternion.RotateTowards(transform.rotation, Quaternion.LookRotation(heading),
+                    ambushAgent.angularSpeed * Time.deltaTime);
+        }
+
+        private void OnDisable() => ambush?.Release(this);
+
+        protected override void OnDefeated() => ambush?.OnDefeated(this);
 
         private void OnDrawGizmosSelected()
         {

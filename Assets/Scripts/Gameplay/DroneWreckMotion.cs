@@ -27,6 +27,8 @@ namespace ShiftFour
         {
             using var profileSample=WreckCreateProfile.Auto();
             var go = new GameObject(owner.name + " disabled wreck rig");
+            // Keep the fall solid against scenery while the player's interaction ray passes through debris.
+            if (owner.OutdoorFlight) go.layer = LayerMask.NameToLayer("Ignore Raycast");
             go.transform.SetPositionAndRotation(owner.transform.position, owner.transform.rotation);
             go.transform.SetParent(root, true);
             var wreck = go.AddComponent<DroneWreckMotion>();
@@ -39,7 +41,7 @@ namespace ShiftFour
             using (GeometryProfile.Auto())
             foreach (MeshFilter filter in owner.GetComponentsInChildren<MeshFilter>(true))
             {
-                if (filter.sharedMesh == null) continue;
+                if (filter.sharedMesh == null || owner.IsAirframeDetail(filter.transform)) continue;
                 Bounds local = filter.sharedMesh.bounds;
                 var bounds = new Bounds(go.transform.InverseTransformPoint(filter.transform.TransformPoint(local.center)), Vector3.zero);
                 for (int i = 0; i < 8; i++)
@@ -70,6 +72,8 @@ namespace ShiftFour
             wreck.Body = go.AddComponent<Rigidbody>();
             wreck.Body.mass = 4f;
             wreck.Body.useGravity = false;
+            if (owner.OutdoorFlight)
+                wreck.Body.linearVelocity = Vector3.ClampMagnitude(owner.MovementVelocity, 3f);
             wreck.Body.linearDamping = .25f; wreck.Body.angularDamping = 1.4f;
             wreck.Body.interpolation = RigidbodyInterpolation.Interpolate;
             wreck.Body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
@@ -81,17 +85,19 @@ namespace ShiftFour
             {
                 // Only actor hierarchies need exclusion; avoid scanning every wall, prop
                 // and floor collider four times during a simultaneous destruction burst.
+                var actorColliders = new List<Collider>();
                 foreach (var player in Object.FindObjectsByType<PlayerController>(FindObjectsSortMode.None))
-                    wreck.IgnoreActor(player);
+                    wreck.IgnoreActor(player, actorColliders);
                 foreach (var drone in Object.FindObjectsByType<DroneBrain>(FindObjectsSortMode.None))
-                    wreck.IgnoreActor(drone);
+                    wreck.IgnoreActor(drone, actorColliders);
             }
             return wreck;
         }
 
-        private void IgnoreActor(Component actor)
+        private void IgnoreActor(Component actor, List<Collider> colliders)
         {
-            foreach (Collider other in actor.GetComponentsInChildren<Collider>())
+            actor.GetComponentsInChildren(false, colliders);
+            foreach (Collider other in colliders)
             {
                 if(other.attachedRigidbody==Body)continue;
                 foreach (Collider shape in shapes)Physics.IgnoreCollision(shape,other);
@@ -130,6 +136,14 @@ namespace ShiftFour
             age += Time.deltaTime;
             if (State == DroneVisualState.CriticalFailure && age >= failureDuration)
             { State = DroneVisualState.Falling; Body.useGravity = true; }
+            // A missed support callback or an unsupported fall must not leave an active rigidbody forever.
+            if (owner.OutdoorFlight && age >= 8f)
+            {
+                bool unsupported = !Body.IsSleeping() && Time.time - lastSupport > .25f;
+                Settle();
+                if (unsupported) gameObject.SetActive(false);
+                return;
+            }
             if (State != DroneVisualState.GroundImpact) return;
             impactAge += Time.deltaTime;
             // Sleeping supported bodies no longer receive OnCollisionStay. Do not leave
@@ -137,14 +151,17 @@ namespace ShiftFour
             bool supported = Body.IsSleeping() || Time.time - lastSupport < .12f;
             if (supported && impactAge > .4f && (Body.IsSleeping() ||
                 (Body.linearVelocity.sqrMagnitude < .04f && Body.angularVelocity.sqrMagnitude < .25f) || impactAge > 1.5f))
-            {
-                Body.linearVelocity = Body.angularVelocity = Vector3.zero;
-                Body.isKinematic = true;
-                // Stable visual wrecks cannot obstruct consoles, doors, shots or essential routes.
-                foreach (Collider shape in shapes) shape.enabled = false;
-                State = DroneVisualState.Disabled;
-                owner.WreckSettled();
-            }
+                Settle();
+        }
+
+        private void Settle()
+        {
+            Body.linearVelocity = Body.angularVelocity = Vector3.zero;
+            Body.isKinematic = true;
+            foreach (Collider shape in shapes) shape.enabled = false;
+            State = DroneVisualState.Disabled;
+            owner.WreckSettled();
+            if (owner.OutdoorFlight) enabled = false;
         }
 
         private void OnCollisionEnter(Collision collision) => Contact(collision);
