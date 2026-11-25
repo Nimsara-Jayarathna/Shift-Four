@@ -109,7 +109,7 @@ namespace ShiftFour
                 OutdoorInterceptorResponse.Phase.Reposition or OutdoorInterceptorResponse.Phase.Intercept => Mode.Intercept,
                 OutdoorInterceptorResponse.Phase.Search => Mode.Search,
                 OutdoorInterceptorResponse.Phase.Return => Mode.Return,
-                OutdoorInterceptorResponse.Phase.Standby => Mode.Standby,
+                OutdoorInterceptorResponse.Phase.Patrol => Mode.Standby,
                 _ when brain.HasCommittedToAttack && brain.WeaponAimPoint.HasValue => Mode.Combat,
                 _ when brain.IsInvestigatingSound => Mode.Investigate,
                 _ => policy?.State switch

@@ -14,7 +14,7 @@ namespace ShiftFour
         private readonly float fov, farClip, side, fogDensity, aerialFog, effectsVolume;
         private bool aerialAtmosphere;
         private readonly int mask;
-        private readonly AudioSource effects, score;
+        private AudioSource effects, score;
         private readonly AudioClip motor;
 
         internal OpenWorldEndingPresentation(Camera view, PlayerController player, OpenWorldExtractionGate gate,
@@ -179,8 +179,14 @@ namespace ShiftFour
                 camera.fieldOfView = fov;
                 camera.farClipPlane = farClip;
             }
+            StopAudio();
+        }
+
+        internal void StopAudio()
+        {
             Stop(effects);
             Stop(score);
+            effects = score = null;
         }
 
         private static void Stop(AudioSource voice)

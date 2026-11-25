@@ -23,6 +23,7 @@ namespace ShiftFour
         private readonly List<(Health Drone, float Expires)> firing = new List<(Health, float)>(3);
         private OutdoorScout notifyingScout;
         internal event Action<OutdoorScout, Vector3> AlertRaised;
+        internal event Action<OutdoorScout, InterceptorEvidence> InterceptorAlert;
         internal bool HasAlert => isActiveAndEnabled && notifyingScout != null &&
             notifyingScout.State != OutdoorScout.Activity.Destroyed && Time.unscaledTime < alertUntil;
 
@@ -80,6 +81,9 @@ namespace ShiftFour
                 alertUntil = Time.unscaledTime + 2.6f;
             }
             AlertRaised?.Invoke(scout, lastSeen);
+            if (scout != null)
+                InterceptorAlert?.Invoke(scout, new InterceptorEvidence(InterceptorObservationSource.ScoutReport,
+                    lastSeen, Time.time, Time.time + 9f, 2f, .8f, scout.GetEntityId().GetHashCode()));
         }
 
         internal bool TryClaimShot()

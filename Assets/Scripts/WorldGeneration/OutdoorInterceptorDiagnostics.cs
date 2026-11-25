@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.Text;
+using Unity.Profiling;
 using UnityEngine;
 
 namespace ShiftFour
@@ -18,21 +20,52 @@ namespace ShiftFour
         private PlayerController player;
         private InterceptorBrain unit;
         private DroneRotorVisuals visual;
-        private bool shown;
+        private enum Page { Overview, Prediction, Utility, Coordination, Controller, Adaptive, Performance }
+        private static readonly string[] Pages = { "Overview", "Prediction", "Utility and Belief", "Coordination",
+            "Agent Controller", "Adaptive Memory", "Performance" };
+        private static readonly string[] Markers =
+        {
+            "ShiftFour.Decision", "ShiftFour.Interceptor.TacticalPlan", "ShiftFour.FindRoute", "ShiftFour.CanConnect",
+            "ShiftFour.Interceptor.RouteValidation", "ShiftFour.InterceptorCoordination", "ShiftFour.InterceptorAssignment",
+            "ShiftFour.PredictionEvaluation", "ShiftFour.InterceptorLearning", "ShiftFour.DroneMotor", "ShiftFour.DroneBody",
+            "ShiftFour.DroneAnimation"
+        };
+        private readonly ProfilerRecorder[] timings = new ProfilerRecorder[Markers.Length];
+        private readonly GUIContent report = new();
+        private float scroll;
+        private bool shown, tracing, sampling;
+        private Page page;
+        private OutdoorInterceptorDispatch squad;
+        private readonly Vector3[] sharedPositions = new Vector3[24];
+        private readonly Vector3[] reservedPositions = new Vector3[4];
+        private readonly Color[] reservedColors = new Color[4];
+        private int sharedCount, reservedCount;
         private int pinned = -1;
         private float nextRefresh;
-        private string report;
         private GUIStyle title, body;
+        private readonly InterceptorBeliefState.Region[] beliefSnapshot = new InterceptorBeliefState.Region[24];
+        private readonly string[] beliefLabels = new string[24];
+        private int beliefCount;
+        private Vector3? searchDestination;
 
         internal void Bind(PlayerController actor, IReadOnlyList<InterceptorBrain> units)
-        { player = actor; stations = units; }
+        { player = actor; stations = units; squad = GetComponent<OutdoorInterceptorDispatch>(); }
 
         private void Update()
         {
             if (Input.GetKeyDown(KeyCode.F6))
             {
                 if (shown && (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift)))
+                {
                     pinned = pinned + 1 >= stations.Count ? -1 : pinned + 1;
+                    scroll = 0f;
+                }
+                else if (shown && (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl) ||
+                    Input.GetKey(KeyCode.LeftCommand) || Input.GetKey(KeyCode.RightCommand)))
+                {
+                    page = (Page)(((int)page + 1) % Pages.Length);
+                    scroll = 0f;
+                }
                 else shown = !shown;
                 nextRefresh = 0f;
             }
@@ -40,24 +73,57 @@ namespace ShiftFour
             if (!shown || player == null || player.MenuBlocksInput)
             {
                 Follow(null);
+                StopTimers();
                 return;
             }
+            if (Input.GetKeyDown(KeyCode.PageDown)) scroll += 180f;
+            if (Input.GetKeyDown(KeyCode.PageUp)) scroll = Mathf.Max(0f, scroll - 180f);
             if (Time.unscaledTime < nextRefresh) return;
-            nextRefresh = Time.unscaledTime + .15f;
+            nextRefresh = Time.unscaledTime + .2f;
             Follow(pinned >= 0 ? stations[pinned] : FindResponder());
-            report = ReadReport();
+            if (page != Page.Performance) StopTimers();
+            report.text = ReadPage();
         }
+
+        private string ReadPage() => page switch
+        {
+            Page.Prediction => ReadPrediction(),
+            Page.Utility => ReadUtility(),
+            Page.Coordination => ReadSquad(),
+            Page.Controller => ReadController(),
+            Page.Adaptive => ReadAdaptive(),
+            Page.Performance => ReadPerformance(),
+            _ => ReadOverview()
+        };
 
         private void Follow(InterceptorBrain next)
         {
-            if (ReferenceEquals(unit, next)) return;
-            if (unit != null) unit.DiagnosticMotor?.RequestSearchEvidence(false);
+            bool trace = next != null && page == Page.Controller;
+            if (ReferenceEquals(unit, next) && trace == tracing) return;
+            if (tracing && unit != null) unit.DiagnosticMotor?.RequestSearchEvidence(false);
             unit = next;
-            visual = next != null ? next.GetComponentInChildren<DroneRotorVisuals>() : null;
-            if (unit != null) unit.DiagnosticMotor?.RequestSearchEvidence(true);
+            tracing = trace;
+            visual = next != null && page == Page.Controller ? next.GetComponentInChildren<DroneRotorVisuals>() : null;
+            if (tracing) unit.DiagnosticMotor?.RequestSearchEvidence(true);
         }
 
-        private void OnDisable() => Follow(null);
+        private void OnDisable()
+        {
+            Follow(null);
+            StopTimers();
+        }
+
+        private void StopTimers()
+        {
+            if (!sampling) return;
+            sampling = false;
+            for (int i = 0; i < timings.Length; i++)
+            {
+                if (!timings[i].Valid) continue;
+                timings[i].Dispose();
+                timings[i] = default;
+            }
+        }
 
         private InterceptorBrain FindResponder()
         {
@@ -71,46 +137,228 @@ namespace ShiftFour
             return first;
         }
 
-        private string ReadReport()
+        private string ReadOverview()
         {
-            if (unit == null) return "No live Interceptor";
-            var policy = unit.Policy;
-            var candidate = policy?.SelectedCandidate;
-            bool observed = policy != null && float.IsFinite(policy.LastObservedAt);
-            string observation = observed
-                ? $"{policy.LastObserved:F1} · {policy.ObservationAge(Time.time):F1} s ago" : "No visual observation";
-            string proposal = candidate != null
-                ? $"J{candidate.Node + 1}  {candidate.Position:F1} · score {candidate.Score:F1}\n" +
-                  $"Estimated arrival  Player {candidate.PlayerArrival:F2} s / Drone {candidate.DroneArrival:F2} s\n" +
-                  $"Validated candidate route  {InterceptorPolicy.Length(candidate.DroneRoute):F1} m" : "No selected junction";
+            if (squad == null) return "No Interceptor deployment";
+            var text = new StringBuilder(450);
+            text.AppendLine($"Deployed {squad.SpawnedCount}/{squad.ConfiguredCount}   Available {squad.AvailableCount}");
+            text.AppendLine($"Active response slots {squad.ActiveCount}/{squad.ResponseLimit}");
+            for (int i = 0; i < 4; i++)
+            {
+                var agent = squad.Unit(i);
+                if (agent == null) { text.AppendLine($"{i + 1:00}   Unavailable"); continue; }
+                text.AppendLine($"{i + 1:00}   {agent.ResponsePhase}  ·  {squad.Role(i + 1, Time.time)}");
+                text.AppendLine($"       {agent.DiagnosticResponse.Action} · {agent.CurrentDecision}");
+            }
+            return text.ToString();
+        }
+
+        private string ReadPrediction()
+        {
+            var policy = unit != null ? unit.Policy : null;
+            if (policy == null || !float.IsFinite(policy.LastObservedAt)) return "No confirmed visual observation";
+            var text = new StringBuilder(550);
+            text.AppendLine($"Last sighting {policy.LastObserved:F1} · {policy.ObservationAge(Time.time):F1} s ago");
+            text.AppendLine($"Velocity {policy.EstimatedVelocity:F2} m/s");
+            text.AppendLine($"Acceleration {policy.EstimatedAcceleration:F2} m/s²");
+            text.AppendLine($"Confidence {policy.Confidence:F2}  ·  Uncertainty {policy.MotionUncertainty(Time.time):F2} m");
+            foreach (var hypothesis in policy.Hypotheses)
+                text.AppendLine($"{hypothesis.Kind}  ·  support {hypothesis.Support:P0}  ·  weight {hypothesis.Weight:P0}");
+            if (policy.SelectedCandidate is InterceptorCandidate selected)
+                text.AppendLine($"Junction {selected.Node + 1} {selected.Position:F1}  ·  {selected.Hypothesis}\n" +
+                    $"Player ETA {selected.PlayerArrival:F2}s   Unit ETA {selected.DroneArrival:F2}s");
+            else text.AppendLine("No selected intersection");
+            text.AppendLine($"Prediction state {policy.State}  ·  Replans {policy.Replans}  ·  Expired attempts {policy.FailedAttempts}");
+            return text.ToString();
+        }
+
+        private string ReadUtility()
+        {
+            beliefCount = 0;
+            searchDestination = null;
+            if (unit == null || unit.DiagnosticResponse is not OutdoorInterceptorResponse response)
+                return "No live Interceptor";
+            var utility = response.Utility;
+            var text = new StringBuilder(800);
+            text.AppendLine($"{utility.Current.Action}  ·  score {utility.Current.Utility:F2}  ·  commit {utility.Remaining(Time.time):F2}s");
+            text.AppendLine($"{utility.Current.Reason}  ·  {utility.Transition}");
+            text.AppendLine("Eligible actions show total, evidence, travel, uncertainty and stability");
+            foreach (var choice in utility.Choices)
+                text.AppendLine(choice.Eligible
+                    ? $"{choice.Action}   {choice.Utility:F2}   {choice.Evidence:F2}   {choice.Travel:F2}   {choice.Uncertainty:F2}   {choice.Stability:F2}"
+                    : $"{choice.Action}  ·  {choice.Reason}");
+            var belief = response.Belief;
+            beliefCount = Mathf.Min(belief.Regions.Count, beliefSnapshot.Length);
+            text.AppendLine($"BELIEF   {beliefCount} regions  ·  entropy {belief.Entropy:F2}  ·  search {response.SearchRemaining(Time.time):F1}s");
+            for (int i = 0; i < beliefCount; i++)
+            {
+                var region = belief.Regions[i];
+                beliefSnapshot[i] = region;
+                beliefLabels[i] = $"{region.Probability:P0}";
+                text.AppendLine($"Region {region.Id}  {region.Probability:P0}  ·  {region.Evidence.Source}  ·  {region.Inspection}");
+            }
+            if (utility.Current.Action is InterceptorAction.InvestigateSound or InterceptorAction.SearchBeliefRegion)
+                searchDestination = utility.Current.Destination;
+            return text.ToString();
+        }
+
+        private string ReadController()
+        {
+            var motor = unit != null ? unit.DiagnosticMotor : null;
+            if (motor == null) return "Motor unavailable";
+            var text = new StringBuilder(650);
+            text.AppendLine($"{motor.MovementStatus}  ·  {motor.MovementMode}  ·  Path {motor.PathStatus}");
+            text.AppendLine($"Actual {motor.ActualSpeed:F2} m/s  ·  Target {motor.TargetSpeed:F2} m/s  ·  Graph v{motor.PlannedGraphVersion}");
+            text.AppendLine($"Replans {motor.ReplanCount}  ·  Block {motor.BlockedReason}");
             var route = unit.ActiveAStarRoute;
-            float routeLength = 0f;
-            var previous = unit.transform.position;
             if (route != null)
-                for (int i = unit.ActiveRouteStep; i < route.Count; i++)
+                for (int i = 0; i < route.Count; i++)
+                    text.AppendLine($"{(i == unit.ActiveRouteStep ? '>' : ' ')} Waypoint {i + 1}  {route[i]:F1}");
+            text.AppendLine(motor.SearchEvidence?.Result != null
+                ? motor.SearchEvidence.Describe() : "Awaiting next traced route query");
+            if (visual != null) text.AppendLine(visual.AnimationReport);
+            return text.ToString();
+        }
+
+        private string ReadPerformance()
+        {
+            sampling = true;
+            var text = new StringBuilder(800);
+            text.AppendLine($"Editor/game frame {Time.unscaledDeltaTime * 1000f:F1} ms");
+            if (unit != null) text.AppendLine($"Selected unit's last tactical plan: {unit.DiagnosticResponse.TacticalRouteQueries} fresh route queries");
+            text.AppendLine("Inclusive scene timings · mean / peak per sampled active frame");
+            for (int i = 0; i < timings.Length; i++)
+            {
+                if (!timings[i].Valid)
+                    timings[i] = ProfilerRecorder.StartNew(ProfilerCategory.Scripts, Markers[i], 120,
+                        ProfilerRecorderOptions.Default | ProfilerRecorderOptions.SumAllSamplesInFrame);
+                int frames = 0;
+                long total = 0, peak = 0;
+                for (int sample = 0; timings[i].Valid && sample < timings[i].Count; sample++)
                 {
-                    routeLength += Vector3.Distance(previous, route[i]);
-                    previous = route[i];
+                    long nanoseconds = timings[i].GetSample(sample).Value;
+                    if (nanoseconds <= 0) continue;
+                    frames++;
+                    total += nanoseconds;
+                    if (nanoseconds > peak) peak = nanoseconds;
                 }
+                text.Append(Markers[i].Substring("ShiftFour.".Length)).Append("  ");
+                text.AppendLine(frames == 0 ? "N/A" : $"{total / (1000d * frames):F2} / {peak / 1000d:F2} µs ({frames})");
+            }
+            return text.ToString();
+        }
 
-            var motor = unit.DiagnosticMotor;
-            string movement = motor == null ? "Motor unavailable" :
-                $"AGENT CONTROLLER\n{motor.MovementStatus}   |   {motor.MovementMode}   |   Path {motor.PathStatus}\n" +
-                $"Speed {motor.ActualSpeed:F1} / {motor.TargetSpeed:F1} m/s   |   Graph version {motor.PlannedGraphVersion}\n" +
-                $"Waypoint {(route != null ? (unit.ActiveRouteStep + 1).ToString() : "—")} / {route?.Count ?? 0}" +
-                $"   |   A* remaining {(route != null ? routeLength.ToString("F1") + " m" : "—")}\n" +
-                $"Route replans {motor.ReplanCount}   |   Block {motor.BlockedReason}\n" +
-                (motor.SearchEvidence?.Result != null ? motor.SearchEvidence.Describe() : "Awaiting next route search");
+        private string ReadAdaptive()
+        {
+            var policy = unit != null ? unit.Policy : null;
+            var learning = unit != null ? unit.DiagnosticResponse?.Learning : null;
+            if (learning == null) return "ADAPTIVE MEMORY\nNo live Interceptor";
+            float now = Time.time;
+            var report = new StringBuilder(768);
+            report.AppendLine($"ADAPTIVE MEMORY  ·  Interceptor {learning.Unit:00}");
+            report.AppendLine(learning.Enabled ? $"Learning rate {learning.Rate:F2}" : "F3 baseline · adaptation off");
+            report.AppendLine($"Evaluated {learning.Evaluated}  ·  Unevaluated {learning.Unevaluated}  ·  Pending {learning.Pending}");
+            report.AppendLine($"Successful {learning.Successful}  ·  Failed {learning.Failed}");
+            report.AppendLine(learning.Evaluated > 0 ? $"Recent mean error {learning.MeanError:F2} m" : "Recent mean error —");
+            report.AppendLine($"Horizon {learning.Horizon:F2} s  ·  Motion uncertainty {policy?.MotionUncertainty(now) ?? 0f:F2} m");
+            report.AppendLine($"Direction changes {learning.DirectionChanges:P0}  ·  Stops {learning.Stopping:P0}  ·  Reversals {learning.Reversals:P0}");
+            report.AppendLine($"Observed speed {learning.MeanSpeed:F1} m/s  ·  Variability {learning.SpeedVariation:F1} m/s");
+            report.AppendLine("HYPOTHESIS  |  SUPPORT → WEIGHT  |  RELIABILITY  |  LAST ERROR");
+            for (int index = 0; index < 6; index++)
+            {
+                var kind = (InterceptorHypothesisKind)index;
+                string weights = "—";
+                if (policy != null)
+                    foreach (var hypothesis in policy.Hypotheses)
+                        if (hypothesis.Kind == kind) { weights = $"{hypothesis.Support:P0} → {hypothesis.Weight:P0}"; break; }
+                float error = learning.LastError(kind);
+                report.AppendLine($"{kind,-10}  {weights,-15}  {learning.Reliability(kind, now):F2}  " +
+                    (float.IsFinite(error) ? $"{error:F2} m" : "—"));
+            }
+            if (learning.LastResult is InterceptorPredictionEvaluator.Result latest)
+                report.AppendLine($"Last evaluation #{latest.Prediction.Id}  {latest.Prediction.Kind}  ·  {latest.Outcome}");
+            report.AppendLine(learning.LastAdaptation);
+            var memory = learning.Memory.Entries;
+            int live = 0, failed = 0, listed = 0;
+            for (int i = memory.Count - 1; i >= 0; i--)
+            {
+                var entry = memory[i];
+                if (entry.Expires <= now) continue;
+                live++;
+                if (InterceptorTacticalMemory.IsNavigation(entry.Outcome) || entry.Outcome == InterceptorOutcome.MissedArrivalWindow)
+                    failed++;
+            }
+            report.AppendLine($"Tactical memory {live}/64  ·  Recent failed destinations {failed}");
+            for (int i = memory.Count - 1; i >= 0; i--)
+            {
+                var entry = memory[i];
+                if (entry.Expires <= now || (!InterceptorTacticalMemory.IsNavigation(entry.Outcome) &&
+                    entry.Outcome != InterceptorOutcome.MissedArrivalWindow)) continue;
+                report.AppendLine($"Latest route failure  {entry.Destination:F1}  ·  {entry.Outcome}");
+                break;
+            }
+            for (int i = memory.Count - 1; i >= 0 && listed < 4; i--)
+            {
+                var entry = memory[i];
+                if (entry.Expires <= now) continue;
+                report.AppendLine($"{entry.Outcome}  {entry.Destination:F1}  ·  {now - entry.Time:F1} s ago");
+                listed++;
+            }
+            return report.ToString();
+        }
 
-            return $"{unit.name}  ·  {(pinned < 0 ? "AUTO" : "PINNED")}\n" +
-                   $"Response  {unit.ResponsePhase}   |   Prediction  {policy?.State.ToString() ?? "Awaiting alert"}\n" +
-                   $"{unit.CurrentDecision}\n" +
-                   $"Last seen  {observation}\n" +
-                   $"Estimated velocity  {(observed ? policy.EstimatedVelocity.ToString("F1") + " m/s" : "—")}\n" +
-                   $"Confidence at last decision  {(observed ? policy.Confidence.ToString("F2") : "—")}\n" +
-                   $"{proposal}\n" +
-                   $"Prediction replans {policy?.Replans ?? 0}   |   Missed predictions {policy?.FailedAttempts ?? 0}\n\n" +
-                   movement + (visual != null ? "\n" + visual.AnimationReport : "");
+        private string ReadSquad()
+        {
+            sharedCount = reservedCount = 0;
+            if (squad == null) return "Squad unavailable";
+            var text = new StringBuilder();
+            float now = Time.time;
+            var coordinator = squad.Coordinator;
+            var records = squad.Knowledge.Records;
+            text.AppendLine("SQUAD COORDINATION");
+            text.AppendLine($"Configured {squad.ConfiguredCount}  Spawned {squad.SpawnedCount}  Available {squad.AvailableCount}");
+            text.AppendLine($"Responses {squad.ActiveCount}/{squad.ResponseLimit}  Shared observations {records.Count}");
+            float newest = float.NegativeInfinity;
+            foreach (var record in records)
+                if (record.Evidence.Fresh(now))
+                {
+                    newest = Mathf.Max(newest, record.Evidence.Time);
+                    sharedPositions[sharedCount++] = record.Evidence.Position;
+                }
+            if (float.IsFinite(newest)) text.AppendLine($"Newest observation {now - newest:F1}s ago");
+            text.AppendLine($"Group value {coordinator.GroupUtility:F2}  Combinations {coordinator.Evaluations}");
+            text.AppendLine($"Updates {coordinator.Updates}  Reassignments {coordinator.Reassignments}");
+            for (int i = 0; i < 4; i++)
+            {
+                var member = squad.Unit(i);
+                if (member == null) { text.AppendLine($"{i + 1:00}  Unavailable"); continue; }
+                var role = squad.Role(i + 1, now);
+                var response = member.DiagnosticResponse;
+                var lease = coordinator.Reservations[i];
+                bool active = lease.Active(now);
+                text.AppendLine($"{i + 1:00}  {response.State} / {role}  |  {response.Action} {response.Utility.Current.Utility:F2}");
+                var goal = active ? (Vector3?)lease.Task.Destination : member.DiagnosticMotor?.FinalDestination;
+                if (goal.HasValue) text.AppendLine($"     {goal.Value:F1}  |  {member.DiagnosticMotor.PathStatus}");
+                if (active)
+                {
+                    reservedPositions[reservedCount] = lease.Task.Destination;
+                    reservedColors[reservedCount++] = role switch
+                    {
+                        InterceptorRole.Primary => RejectedColor,
+                        InterceptorRole.Secondary => new Color(1f, .55f, .26f),
+                        InterceptorRole.Search => LastSeenColor,
+                        _ => JunctionColor
+                    };
+                    text.AppendLine($"     #{lease.Id} expires in {lease.Until - now:F1}s  ETA {lease.Task.Eta:F1}s");
+                }
+                text.Append("     Proposals");
+                foreach (var task in squad.Matrix[i])
+                    text.Append($"  {task.Action} {task.Utility:F2}" +
+                        (coordinator.Conflicts(i + 1, task.Destination, now) ? " [reserved]" : ""));
+                if (squad.Matrix[i].Count == 0) text.Append(" —");
+                text.AppendLine();
+            }
+            return text.ToString();
         }
 
         private void OnGUI()
@@ -137,6 +385,22 @@ namespace ShiftFour
                 if (motor != null && motor.ActualSpeed > .15f)
                     Line(camera, unit.transform.position, unit.transform.position + Vector3.ClampMagnitude(motor.ActualVelocity, 2f), WaypointColor);
 
+                if (page == Page.Utility && searchDestination.HasValue)
+                    Mark(camera, searchDestination.Value, DestinationColor, 15f);
+                for (int i = 0; page == Page.Utility && i < beliefCount; i++)
+                {
+                    var region = beliefSnapshot[i];
+                    Color color = region.Inspection switch
+                    {
+                        InterceptorInspection.Inspected => RouteColor,
+                        InterceptorInspection.Unreachable or InterceptorInspection.Occluded => RejectedColor,
+                        _ => LastSeenColor
+                    };
+                    Mark(camera, region.Position, color, 5f + region.Probability * 14f);
+                    Vector3 screen = camera.WorldToScreenPoint(region.Position);
+                    if (screen.z > 0f)
+                        GUI.Label(new Rect(screen.x + 8f, Screen.height - screen.y - 10f, 55f, 20f), beliefLabels[i]);
+                }
                 var policy = unit.Policy;
                 if (policy != null)
                 {
@@ -152,6 +416,16 @@ namespace ShiftFour
                     }
                 }
             }
+            if (page == Page.Coordination)
+            {
+                for (int i = 0; i < sharedCount; i++) Mark(camera, sharedPositions[i], LastSeenColor, 6f);
+                for (int i = 0; i < reservedCount; i++) Mark(camera, reservedPositions[i], reservedColors[i], 16f);
+                foreach (var member in stations)
+                {
+                    if (member == unit || !member.CoordinationAvailable) continue;
+                    Polyline(camera, member.ActiveAStarRoute, member.ActiveRouteStep, member.transform.position, RouteColor);
+                }
+            }
             DrawPanel();
             GUI.depth = previousDepth;
             GUI.color = previousColor;
@@ -161,40 +435,34 @@ namespace ShiftFour
         {
             title ??= new GUIStyle(GUI.skin.label)
             {
-                fontSize = 15, fontStyle = FontStyle.Bold, normal = { textColor = Color.white }
+                fontStyle = FontStyle.Bold, normal = { textColor = Color.white }
             };
             body ??= new GUIStyle(GUI.skin.label)
             {
-                fontSize = 12, wordWrap = true, normal = { textColor = new Color(.88f, .94f, .98f) }
+                wordWrap = true, normal = { textColor = new Color(.88f, .94f, .98f) }
             };
-            float width = Mathf.Min(405f, Screen.width - 24f);
-            var content = new GUIContent(report ?? string.Empty);
+            float width = Mathf.Min(560f, Screen.width - 24f);
+            title.fontSize = Screen.width < 850 ? 14 : 17;
+            body.fontSize = Screen.width < 850 ? 11 : 13;
             const float margin = 12f;
-            float textHeight = body.CalcHeight(content, width - 2f * margin);
-            Rect panel = new(Screen.width - width - margin, 16f, width, textHeight + 116f);
+            float contentWidth = width - 2f * margin;
+            float fullHeight = body.CalcHeight(report, contentWidth);
+            float height = Mathf.Min(fullHeight, Mathf.Max(24f, Screen.height - 127f));
+            scroll = Mathf.Clamp(scroll, 0f, Mathf.Max(0f, fullHeight - height));
+            Rect panel = new(Screen.width - width - margin, margin, width, height + 102f);
             GUI.color = new Color(.025f, .055f, .073f, .96f);
             GUI.DrawTexture(panel, Texture2D.whiteTexture);
             GUI.color = Color.white;
             float x = panel.x + margin;
-            GUI.Label(new Rect(x, panel.y + 8, width - 24f, 25), "INTERCEPTOR DIAGNOSTICS", title);
-            GUI.Label(new Rect(x, panel.y + 35, width - 24f, textHeight), content, body);
-            float y = panel.y + 39 + textHeight;
-            Legend(x, y, JunctionColor, "Nodes");
-            Legend(x + 53, y, RouteColor, "A* / junction");
-            Legend(x + 147, y, PredictionColor, "Prediction");
-            Legend(x + 230, y, LastSeenColor, "Last seen");
-            Legend(x + 305, y, RejectedColor, "Blocked");
-            Legend(x, y + 20, WaypointColor, "Waypoint");
-            Legend(x + 83, y + 20, DestinationColor, "Destination");
-            GUI.Label(new Rect(x, y + 44, width - 24f, 22), "F6  Close     Shift + F6  Next unit / Auto", body);
-        }
-
-        private void Legend(float x, float y, Color color, string text)
-        {
-            GUI.color = color;
-            GUI.DrawTexture(new Rect(x, y + 7, 4, 4), Texture2D.whiteTexture);
-            GUI.color = Color.white;
-            GUI.Label(new Rect(x + 6, y, 85, 21), text, body);
+            GUI.Label(new Rect(x, panel.y + 5f, contentWidth, 26f),
+                $"{(int)page + 1}/{Pages.Length}  {Pages[(int)page].ToUpperInvariant()}", title);
+            GUI.Label(new Rect(x, panel.y + 30f, contentWidth, 22f),
+                unit != null ? $"{unit.name}  ·  {(pinned < 0 ? "Auto" : "Pinned")}" : "No live unit", body);
+            GUI.BeginGroup(new Rect(x, panel.y + 52f, contentWidth, height));
+            GUI.Label(new Rect(0f, -scroll, contentWidth, fullHeight), report, body);
+            GUI.EndGroup();
+            GUI.Label(new Rect(x, panel.y + height + 55f, contentWidth, 40f),
+                "F6 Close   Shift+F6 Unit   Ctrl/⌘+F6 Tab   PgUp/PgDn Scroll", body);
         }
 
         private static Vector2 ScreenPoint(Vector3 p) => new(p.x, Screen.height - p.y);

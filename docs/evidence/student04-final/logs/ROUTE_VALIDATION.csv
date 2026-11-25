@@ -1,0 +1,3 @@
+mode,decisions,cached_repeats,mean_us,peak_us,allocation_events
+original,500,500,5.7052,44.7000,5000
+optimized,500,500,4.0556,51.2000,2000

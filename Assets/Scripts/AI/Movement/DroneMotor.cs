@@ -84,6 +84,7 @@ namespace ShiftFour
         internal int RouteStepForDiagnostics => step;
         internal string MovementStatus => state.ToString();
         internal string BlockedReason => blockedBy.ToString();
+        internal Collider RouteBlocker => stalledBy;
         internal string PathStatus => !NavigationReady ? "Unavailable" : agent.pathPending ? "Pending" :
             HasRoute ? agent.pathStatus.ToString() : "No path";
         internal int PlannedGraphVersion => graphVersion;

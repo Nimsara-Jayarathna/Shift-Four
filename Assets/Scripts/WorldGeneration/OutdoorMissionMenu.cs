@@ -9,7 +9,7 @@ namespace ShiftFour
     {
         internal OutdoorSettings Preferences { get; private set; }
         internal const string ScenePath = "Assets/Scenes/OpenWorldPrototype.unity";
-        public enum ScreenState { Title, Playing, Paused, Settings, Dying, GameOver, Victory, Loading, Map, Missions, Ending }
+        public enum ScreenState { Title, Playing, Paused, Settings, Dying, GameOver, Victory, Loading, Map, Missions, Ending, Credits }
         public ScreenState Screen { get; private set; } = ScreenState.Title;
         private ScreenState settingsParent;
         internal PrototypePlayerFeedback Feedback { get; private set; }
@@ -26,6 +26,11 @@ namespace ShiftFour
         internal bool ShowingResult => Screen == ScreenState.GameOver || Screen == ScreenState.Victory;
         private OpenWorldEndingPresentation ending;
         internal float EndingTime => ending?.Elapsed ?? 0f;
+        internal const float CreditsDuration = 17f;
+        internal float CreditsTime { get; private set; }
+        internal OutdoorCreditsConfig CreditsConfig { get; private set; }
+        private AudioSource creditsMusic;
+        private int creditsStartFrame;
         private Camera view;
         private Transform overviewBuilding;
         private readonly OutdoorMenuView panel = new OutdoorMenuView();
@@ -84,8 +89,10 @@ namespace ShiftFour
             if (next != null) next.Extracted += OnExtracted;
 
             // The generator also supports deliberately replacing a finished layout in Play Mode.
-            if ((Screen == ScreenState.Victory || Screen == ScreenState.Ending) && health.IsAlive && (next == null || !next.Escaped))
+            if ((Screen == ScreenState.Victory || Screen == ScreenState.Ending || Screen == ScreenState.Credits) &&
+                health.IsAlive && (next == null || !next.Escaped))
             {
+                ReleaseCredits();
                 ReleaseEnding();
                 RestoreClock();
                 player.ApplyCameraPose();
@@ -104,6 +111,7 @@ namespace ShiftFour
         }
         private void OnExtracted()
         {
+            if (Screen == ScreenState.Ending || Screen == ScreenState.Credits || ShowingResult) return;
             if (!isActiveAndEnabled || Screen != ScreenState.Playing || view == null || extraction.Gate == null)
             {
                 extraction.Gate?.SetOpening(1f);
@@ -122,14 +130,71 @@ namespace ShiftFour
             ending = null;
         }
 
-        internal void FinishEnding()
+        private void FinishEnding(bool spaceHeld)
         {
             if (Screen != ScreenState.Ending) return;
+            ending?.StopAudio();
+            CreditsConfig = Resources.Load<OutdoorCreditsConfig>("OutdoorCredits");
+            CreditsTime = 0f;
+            creditsStartFrame = Time.frameCount;
+            Change(ScreenState.Credits);
+            waitForSkipRelease = spaceHeld;
+            if (CreditsConfig == null)
+            {
+                Debug.LogError("Missing Resources/OutdoorCredits configuration.", this);
+                FinishCredits();
+                return;
+            }
+            if (CreditsConfig.Music != null)
+            {
+                var voice = new GameObject("Credits music");
+                voice.transform.SetParent(transform, false);
+                creditsMusic = voice.AddComponent<AudioSource>();
+                creditsMusic.playOnAwake = false;
+                creditsMusic.ignoreListenerPause = true;
+                creditsMusic.clip = CreditsConfig.Music;
+                creditsMusic.volume = 0f;
+                creditsMusic.Play();
+            }
+        }
+
+        private void AdvanceCredits(float delta, bool spaceDown, bool spaceHeld)
+        {
+            if (Time.frameCount == creditsStartFrame) return;
+            if (!spaceHeld) waitForSkipRelease = false;
+            CreditsTime += delta;
+            // Keep the last camera shot until the graphite backdrop has fully covered it.
+            if (CreditsTime >= 1f && ending != null) ReleaseEnding();
+            if (creditsMusic != null)
+            {
+                float envelope = Mathf.SmoothStep(0, 1, CreditsTime / 1.4f) *
+                    Mathf.SmoothStep(0, 1, (CreditsDuration - CreditsTime) / 1.5f);
+                creditsMusic.volume = Preferences.Applied.Music * .0025f * envelope;
+            }
+            if ((spaceDown && !waitForSkipRelease) || CreditsTime >= CreditsDuration)
+                FinishCredits();
+        }
+
+        private void ReleaseCredits()
+        {
+            if (creditsMusic != null)
+            {
+                creditsMusic.Stop();
+                Destroy(creditsMusic.gameObject);
+                creditsMusic = null;
+            }
+            CreditsConfig = null;
+            CreditsTime = 0f;
+            waitForSkipRelease = false;
+        }
+
+        private void FinishCredits()
+        {
             ReleaseEnding();
-            RestoreClock();
+            ReleaseCredits();
             Change(ScreenState.Victory);
             waitForSkipRelease = Input.GetKey(KeyCode.Space);
-            Freeze();
+            SetCursor(false);
             opacity = 0f;
         }
 
@@ -216,7 +281,12 @@ namespace ShiftFour
             if (Screen == ScreenState.Ending)
             {
                 if (Input.GetKeyDown(KeyCode.Space) || ending == null || ending.Advance(Time.unscaledDeltaTime))
-                    FinishEnding();
+                    FinishEnding(Input.GetKey(KeyCode.Space));
+                return;
+            }
+            if (Screen == ScreenState.Credits)
+            {
+                AdvanceCredits(Time.unscaledDeltaTime, Input.GetKeyDown(KeyCode.Space), Input.GetKey(KeyCode.Space));
                 return;
             }
             if (Screen == ScreenState.Playing)
@@ -366,9 +436,10 @@ namespace ShiftFour
 
         private void OnDisable()
         {
-            if (Screen == ScreenState.Ending)
+            if (Screen == ScreenState.Ending || Screen == ScreenState.Credits)
             {
                 ReleaseEnding();
+                ReleaseCredits();
                 Change(ScreenState.Victory);
                 opacity = 0f;
             }

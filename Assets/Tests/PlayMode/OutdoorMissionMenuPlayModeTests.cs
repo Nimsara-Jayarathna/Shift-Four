@@ -28,9 +28,9 @@ namespace ShiftFour.Tests
             yield return Await(() => State == "Playing");
         }
 
-        private static IEnumerator Await(Func<bool> condition)
+        private static IEnumerator Await(Func<bool> condition, float timeout = 12f)
         {
-            float limit = Time.realtimeSinceStartup + 12f;
+            float limit = Time.realtimeSinceStartup + timeout;
             while (!condition())
             {
                 Assert.That(Time.realtimeSinceStartup, Is.LessThan(limit), "Menu transition timed out");
@@ -81,7 +81,7 @@ namespace ShiftFour.Tests
             Press("Pause"); Press("Settings");
             var positions = Object.FindObjectsByType(T("DroneBrain"), FindObjectsSortMode.None).Cast<Component>()
                 .Select(d => (d.transform, d.transform.position)).ToArray();
-            Assert.That(positions.Length, Is.EqualTo(25));
+            Assert.That(positions.Length, Is.EqualTo(26));
             var hp = Read(health, "Current");
             yield return new WaitForSecondsRealtime(.15f);
             Assert.That(Time.timeScale, Is.Zero);
@@ -283,11 +283,12 @@ namespace ShiftFour.Tests
             Assert.That(player.transform.position, Is.EqualTo(root));
             Assert.That(player.GetComponent<CharacterController>().enabled, Is.True);
             Damage(health);
+            Assert.That(Menu.transform.Find("Credits music"), Is.Null);
             yield return VerifyResultNavigation("GameOver", retry);
         }
 
         [UnityTest]
-        public IEnumerator OnlyRealExtractionYieldsVictory([Values(1234, 5678, 9012)] int seed)
+        public IEnumerator OnlyRealExtractionYieldsVictory([Values(1234, 5678, 9012, 3456)] int seed)
         {
             yield return StartMission();
             var generator = Single("WorldGenerator");
@@ -380,7 +381,9 @@ namespace ShiftFour.Tests
                 Assert.That(Single("OpenWorldExtractionGate").transform.Find("Extraction shutter").localPosition.y, Is.Zero);
                 yield break;
             }
-            if (seed == 5678) Menu.GetType().GetMethod("FinishEnding", Internal).Invoke(Menu, null);
+            var finishEnding = Menu.GetType().GetMethod("FinishEnding", Internal);
+            var advanceCredits = Menu.GetType().GetMethod("AdvanceCredits", Internal);
+            if (seed != 1234) finishEnding.Invoke(Menu, new object[] { true });
             else
             {
                 yield return Await(() => (float)Menu.GetType().GetProperty("EndingTime", Internal).GetValue(Menu) > 8.1f);
@@ -391,6 +394,59 @@ namespace ShiftFour.Tests
                     Assert.That(point.x, Is.InRange(0f, 1f));
                     Assert.That(point.y, Is.InRange(0f, 1f));
                 }
+                yield return Await(() => State == "Credits");
+            }
+            Assert.That(State, Is.EqualTo("Credits"));
+            Assert.That(Time.timeScale, Is.Zero);
+            Assert.That(Read(player, "CanAct"), Is.False);
+            Assert.That(Cursor.visible, Is.False);
+            var config = Menu.GetType().GetProperty("CreditsConfig", Internal).GetValue(Menu);
+            Assert.That(config, Is.SameAs(Resources.Load("OutdoorCredits")));
+            Assert.That(config.GetType().GetProperty("GroupLine", Internal).GetValue(config), Is.EqualTo("DEVELOPED BY GROUP - 26"));
+            var roster = (Array)config.GetType().GetProperty("Team", Internal).GetValue(config);
+            Assert.That(roster.Cast<object>().Select(m => m.GetType().GetField("name").GetValue(m)),
+                Is.EqualTo(new[] { "PAMUDI", "NIMSARA", "NIMTHARA", "ASMADALA" }));
+            var music = Menu.transform.Find("Credits music").GetComponent<AudioSource>();
+            Assert.That(music.clip, Is.SameAs(Resources.Load<AudioClip>("Audio/BackgroundMusic")));
+            Assert.That(music.ignoreListenerPause, Is.True);
+            Assert.That(music.ignoreListenerVolume, Is.False);
+            finishEnding.Invoke(Menu, new object[] { true });
+            Interact(gate);
+            Press("Play"); Press("Pause"); Press("MainMenu");
+            Assert.That(Menu.GetComponentsInChildren<AudioSource>().Count(a => a.name == "Credits music"), Is.EqualTo(1));
+            if (seed == 5678)
+            {
+                void Tick(bool down, bool held) => advanceCredits.Invoke(Menu, new object[] { .016f, down, held });
+                Tick(true, true); // Space that cut the extraction, in the same frame.
+                Assert.That(State, Is.EqualTo("Credits"));
+                yield return null;
+                Tick(false, true);
+                Assert.That(State, Is.EqualTo("Credits"));
+                Tick(false, false);
+                Tick(true, true); // A new press skips directly to the results.
+            }
+            else if (seed == 3456)
+            {
+                generator.GetType().GetMethod("Generate").Invoke(generator, null);
+                yield return null;
+                Assert.That(State, Is.EqualTo("Playing"));
+                Assert.That(music == null, Is.True);
+                Assert.That(Time.timeScale, Is.EqualTo(.75f));
+                Assert.That(Read(player, "CanAct"), Is.True);
+                Assert.That(camera.cullingMask, Is.EqualTo(mask));
+                yield break;
+            }
+            else
+            {
+                float Age() => (float)Menu.GetType().GetProperty("CreditsTime", Internal).GetValue(Menu);
+                yield return Await(() => Age() >= 2f);
+                Assert.That(sources.All(a => a == null), Is.True);
+                float plateau = music.volume;
+                var prefs = Menu.GetType().GetProperty("Preferences", Internal).GetValue(Menu);
+                var applied = prefs.GetType().GetProperty("Applied", Internal).GetValue(prefs);
+                Assert.That(plateau, Is.EqualTo((int)applied.GetType().GetField("Music", Internal).GetValue(applied) * .0025f).Within(.001f));
+                yield return Await(() => Age() >= 16.5f, 18f);
+                Assert.That(music.volume, Is.LessThanOrEqualTo(plateau * .4f));
                 yield return Await(() => State == "Victory");
             }
             Assert.That(State, Is.EqualTo("Victory"));
@@ -404,6 +460,7 @@ namespace ShiftFour.Tests
             Assert.That(Read(hp, "Current"), Is.EqualTo(health));
             yield return null;
             Assert.That(sources.All(a => a == null), Is.True);
+            Assert.That(music == null, Is.True);
             yield return VerifyResultNavigation("Victory", seed == 1234);
         }
 
@@ -439,7 +496,7 @@ namespace ShiftFour.Tests
             Assert.That(Read(Read(player, "Weapons"), "ActiveWeapon"), Is.Null);
             Assert.That(Read(Single("OpenWorldMissionManager"), "DronesDefeated"), Is.EqualTo(0));
             Assert.That(Read(Single("OpenWorldMissionManager"), "BuildingMissionsCompleted"), Is.EqualTo(0));
-            Assert.That(Object.FindObjectsByType(T("DroneBrain"), FindObjectsSortMode.None).Length, Is.EqualTo(25));
+            Assert.That(Object.FindObjectsByType(T("DroneBrain"), FindObjectsSortMode.None).Length, Is.EqualTo(26));
             Assert.That(Object.FindObjectsByType<AudioListener>().Length, Is.EqualTo(1));
         }
 
@@ -579,7 +636,7 @@ namespace ShiftFour.Tests
             yield return null;
             Assert.That(State, Is.EqualTo("Title"));
             Assert.That(Time.timeScale, Is.Zero);
-            Assert.That(Object.FindObjectsByType(T("DroneBrain"), FindObjectsSortMode.None).Length, Is.EqualTo(25));
+            Assert.That(Object.FindObjectsByType(T("DroneBrain"), FindObjectsSortMode.None).Length, Is.EqualTo(26));
             Assert.That(Single("WorldGenerator").transform.Find("GeneratedWorld"), Is.Not.Null);
             Assert.That(Single("PrototypePlayerFeedback"), Is.Not.Null);
         }

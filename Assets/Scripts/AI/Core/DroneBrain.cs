@@ -93,7 +93,7 @@ namespace ShiftFour
         protected virtual bool UsesImmediateSoundInvestigation => rapidSoundResponse;
         public float DecisionInterval => float.IsNaN(decisionInterval) || float.IsInfinity(decisionInterval)
             ? .08f : Mathf.Clamp(decisionInterval, .02f, .3f);
-        private Vector3 CombatOrigin => weaponMount != null ? weaponMount.MuzzlePosition :
+        protected Vector3 CombatOrigin => weaponMount != null ? weaponMount.MuzzlePosition :
             transform.position + Vector3.up * combatOriginHeight;
 
         public void Configure(string label, Vector3 post)
@@ -315,12 +315,16 @@ namespace ShiftFour
             return ClearShot(origin, vector, VisionDistance);
         }
 
+        // The utility policy proposes fire only when the shared combat gates can admit it.
+        // TryShoot still checks the muzzle and pivot against the current collision scene.
+        protected bool ShotReady => Time.time >= nextShot && ReadyForPrototypeShot &&
+            (outdoorAttackBudget == null || outdoorAttackBudget.CanFire(health));
+
         private void TryShoot()
         {
             using var profileSample=FireProfile.Auto();
             if (!Alive || playerHealth == null || !playerHealth.IsAlive ||
-                (outdoorPatrol == null && GameSession.Instance != null && GameSession.Instance.Ended) || Time.time < nextShot) return;
-            if (!ReadyForPrototypeShot || (outdoorAttackBudget != null && !outdoorAttackBudget.CanFire(health))) return;
+                (outdoorPatrol == null && GameSession.Instance != null && GameSession.Instance.Ended) || !ShotReady) return;
             float range = AttackRange;
             if (Vector3.Distance(CombatOrigin, player.EyePosition) > range ||
                 (combatReadiness == null ? !CanSeePlayer() : !player.isActiveAndEnabled || !CanTarget(player.transform.position))) return;

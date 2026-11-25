@@ -281,7 +281,7 @@ namespace ShiftFour.Tests
                 Material CheckShared(string name)
                 {
                     var matches = renderers.Where(r => r.name == name).ToArray();
-                    Assert.That(matches.Length, Is.EqualTo(25), name);
+                    Assert.That(matches.Length, Is.EqualTo(26), name);
                     var materials = matches.Select(r => r.sharedMaterial).Distinct().ToArray();
                     Assert.That(materials.Length, Is.EqualTo(1), name);
                     Assert.That(materials[0] != null, Is.True, name);
@@ -559,7 +559,7 @@ namespace ShiftFour.Tests
                 Assert.That(retired == null, Is.True, $"Seed {seed} retires old colliders");
                 Assert.That(Find("WorldGenerator").Length, Is.EqualTo(1));
                 var drones = Find("DroneBody");
-                Assert.That(drones.Length, Is.EqualTo(25));
+                Assert.That(drones.Length, Is.EqualTo(26));
                 foreach (var drone in drones)
                 {
                     Assert.That(drone.GetComponent<NavMeshAgent>().isOnNavMesh, Is.True, drone.name);
@@ -801,7 +801,7 @@ namespace ShiftFour.Tests
                 Generate(seed);
                 yield return null;
                 var visuals = World.GetComponentsInChildren(RuntimeType("DroneRotorVisuals"));
-                Assert.That(visuals.Length, Is.EqualTo(25));
+                Assert.That(visuals.Length, Is.EqualTo(26));
                 Assert.That(previous == null, Is.True, "Regeneration retired the old rig");
                 foreach (var visual in visuals)
                 {
@@ -842,7 +842,7 @@ namespace ShiftFour.Tests
             yield return null;
             yield return null;
             Component[] bodies = Find("DroneBody");
-            Assert.That(bodies.Length, Is.EqualTo(25));
+            Assert.That(bodies.Length, Is.EqualTo(26));
             foreach (var body in bodies)
             {
                 Assert.That(body.GetComponent<NavMeshAgent>().isOnNavMesh, Is.True, body.name);

@@ -72,19 +72,20 @@ namespace ShiftFour
         [SerializeField, Range(0f, 1f)] private float flankerPredictionSeconds = .45f;
 
         [Header("Outdoor Interceptor response")]
-        [SerializeField, Range(2f, 30f)] private float interceptorResponseCooldown = 8f;
-        [SerializeField, Range(8f, 45f)] private float interceptorPursuitTime = 28f;
-        [SerializeField, Range(25f, 180f)] private float interceptorPursuitDistance = 110f;
+        [SerializeField, Range(2f, 30f)] private float interceptorResponseCooldown = 4f;
+        [SerializeField, Range(8f, 45f)] private float interceptorPursuitTime = 40f;
+        [SerializeField, Range(25f, 180f)] private float interceptorPursuitDistance = 140f;
+        [SerializeField, Range(10f, 50f)] private float interceptorVisionDistance = 35f;
         [SerializeField, Range(1.5f, 6f)] private float interceptorLeadHorizon = 4f;
 
         [Header("Prototype drone combat")]
         [SerializeField, Range(5, 7)] private int outdoorScoutCount = 7;
         [SerializeField, Range(3, 5)] private int outdoorFlankerCount = 5;
-        [SerializeField, Range(1, 3)] private int outdoorInterceptorCount = 3;
+        [SerializeField, Range(1, OutdoorInterceptorDispatch.MaxStations)] private int outdoorInterceptorCount = OutdoorInterceptorDispatch.MaxStations;
         [Tooltip("Maximum distinct outdoor attackers in a rolling 1.35 second window.")]
         [SerializeField, Range(1, 3)] private int outdoorAttackLimit = 2;
-        [Tooltip("Maximum Interceptors actively responding to Scout sightings at once.")]
-        [SerializeField, Range(1, 3)] private int interceptorResponseLimit = 1;
+        [Tooltip("Maximum Interceptors responding to Scout sightings or direct visual contact at once.")]
+        [SerializeField, Range(1, OutdoorInterceptorDispatch.MaxStations)] private int interceptorResponseLimit = 2;
         [SerializeField] private DroneCombatTempo guardTempo = new DroneCombatTempo(1.2f, .34f);
         [SerializeField] private DroneCombatTempo scoutTempo = new DroneCombatTempo(1.4f, .46f);
         [SerializeField] private DroneCombatTempo flankerTempo = new DroneCombatTempo(1.55f, .63f);
@@ -97,7 +98,7 @@ namespace ShiftFour
 
         public int OutdoorScoutCount => Mathf.Clamp(outdoorScoutCount, 5, OutdoorScoutRoutes.Names.Length);
         public int OutdoorFlankerCount => Mathf.Clamp(outdoorFlankerCount, 3, 5);
-        public int OutdoorInterceptorCount => Mathf.Clamp(outdoorInterceptorCount, 1, 3);
+        public int OutdoorInterceptorCount => Mathf.Clamp(outdoorInterceptorCount, 1, OutdoorInterceptorDispatch.MaxStations);
         public int OutdoorAttackLimit => Mathf.Clamp(outdoorAttackLimit, 1, 3);
         public int InterceptorResponseLimit => Mathf.Clamp(interceptorResponseLimit, 1, OutdoorInterceptorCount);
         public int GeneratedSeed { get; private set; }
@@ -263,10 +264,11 @@ namespace ShiftFour
                     extractionFlanker = ambushes.Deploy(flankerPrefab, player, patrols, settings, layoutSeed);
                 }
                 var interceptors = patrols != null ? OutdoorInterceptorDispatch.Deploy(next, patrols, interceptorPrefab,
-                    player, boundary, EncounterSetting(interceptorResponseCooldown, 8f, 2f, 30f),
-                    EncounterSetting(interceptorPursuitTime, 28f, 8f, 45f),
-                    EncounterSetting(interceptorPursuitDistance, 110f, 25f, 180f),
+                    player, EncounterSetting(interceptorResponseCooldown, 4f, 2f, 30f),
+                    EncounterSetting(interceptorPursuitTime, 40f, 8f, 45f),
+                    EncounterSetting(interceptorPursuitDistance, 140f, 25f, 180f),
                     EncounterSetting(interceptorLeadHorizon, 4f, 1.5f, 6f),
+                    EncounterSetting(interceptorVisionDistance, 35f, 10f, 50f),
                     OutdoorInterceptorCount, InterceptorResponseLimit, layoutSeed) : null;
                 player?.GetComponent<PrototypePlayerFeedback>()?.SetOutdoorEncounters(patrols, ambushes, interceptors);
                 float detectionScale = float.IsNaN(guardDetectionScale) ? 1f : Mathf.Clamp(guardDetectionScale, .5f, 1.5f);

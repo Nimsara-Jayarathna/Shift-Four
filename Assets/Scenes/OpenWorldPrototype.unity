@@ -49543,6 +49543,12 @@ MonoBehaviour:
     Lettering: {fileID: 2100000, guid: fa0bd65c63826f44d94e774559f12899, type: 2}
     CheckpointSignal: {fileID: 2100000, guid: 3dd5e50ba54e644faba499f267df5743, type: 2}
   generatedContent: {fileID: 0}
+  interceptorResponseCooldown: 4
+  interceptorPursuitTime: 40
+  interceptorPursuitDistance: 140
+  interceptorVisionDistance: 35
+  outdoorInterceptorCount: 4
+  interceptorResponseLimit: 2
 --- !u!1 &1275830768
 GameObject:
   m_ObjectHideFlags: 0

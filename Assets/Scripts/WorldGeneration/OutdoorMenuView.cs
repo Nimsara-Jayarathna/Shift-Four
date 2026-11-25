@@ -51,9 +51,14 @@ namespace ShiftFour
             GUI.depth = -100;
             alpha = opacity;
             GUI.color = new Color(1, 1, 1, alpha);
-            if (menu.Screen == OutdoorMissionMenu.ScreenState.Ending || menu.Screen == OutdoorMissionMenu.ScreenState.Playing || menu.ViewingBriefing)
+            if (menu.Screen == OutdoorMissionMenu.ScreenState.Ending || menu.Screen == OutdoorMissionMenu.ScreenState.Credits ||
+                menu.Screen == OutdoorMissionMenu.ScreenState.Playing || menu.ViewingBriefing)
             {
                 if (menu.Screen == OutdoorMissionMenu.ScreenState.Ending) DrawEnding(menu.EndingTime, w, h);
+                else if (menu.Screen == OutdoorMissionMenu.ScreenState.Credits)
+                {
+                    if (Event.current.type == EventType.Repaint) DrawCredits(menu, w, h);
+                }
                 else if (menu.ViewingBriefing) DrawBriefing(menu, w, h, busy);
                 else
                 {
@@ -238,6 +243,7 @@ namespace ShiftFour
         internal void Dispose()
         {
             if (shade != null) Object.Destroy(shade);
+            if (creditsBackdrop != null) Object.Destroy(creditsBackdrop);
         }
     }
 }
