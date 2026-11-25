@@ -15,6 +15,7 @@ namespace ShiftFour
             public DroneBody Body;
             public Action<DamageRecord> Listener;
             public string Label;
+            public DroneFlightRole Role;
             public float RevealUntil, Alpha, Fraction, Trail, Maximum;
             public Vector2 ScreenPoint;
             public bool Visible;
@@ -41,10 +42,21 @@ namespace ShiftFour
         public float DamageFlashStrength => Mathf.Clamp01(1 - (Time.unscaledTime - damageAt) / .55f);
         public bool DamageDirectionKnown => knownOrigin && Time.unscaledTime - damageAt < .85f;
         public int VisibleDroneBarCount { get; private set; }
+        private enum Identification { AimOrCombat, VisibleNearby, Off }
+        [SerializeField] private Identification droneIdentification = Identification.AimOrCombat;
+        [SerializeField, Range(5f, 40f)] private float identificationRange = 30f;
+        private bool prototype;
 
         public void Initialize(GameSession game, PlayerController actor, DroneBrain[] targets)
+            => Initialize(game, actor, targets, false);
+
+        internal void InitializePrototype(PlayerController actor, DroneBrain[] targets)
+            => Initialize(null, actor, targets, true);
+
+        private void Initialize(GameSession game, PlayerController actor, DroneBrain[] targets, bool prototypeOnly)
         {
             Unbind();
+            prototype = prototypeOnly;
             session = game; player = actor;
             health = player != null ? player.GetComponent<Health>() : null;
             weapons = player != null ? player.Weapons : null;
@@ -56,11 +68,27 @@ namespace ShiftFour
                 if (targetHealth == null || drones.Exists(d => d.Health == targetHealth)) continue;
                 var bar = new DroneBar { Brain = target, Health = targetHealth, Body = target.GetComponent<DroneBody>(),
                     Label = string.IsNullOrEmpty(target.AgentName) ? target.GetType().Name.Replace("Brain", "").ToUpperInvariant() : target.AgentName.ToUpperInvariant() };
+                if (prototype)
+                {
+                    bar.Role = DroneRotorVisuals.Identify(target);
+                    bar.Label = bar.Role == DroneFlightRole.Default ? "DRONE" : bar.Role.ToString().ToUpperInvariant();
+                }
                 bar.Listener = damage => OnDroneDamage(bar, damage);
                 drones.Add(bar);
             }
             ResetPresentation();
             if (isActiveAndEnabled) Bind();
+        }
+
+        private void Start()
+        {
+            // The first world is generated before PlayerController.Awake creates the weapon controller.
+            if (!prototype || player == null) return;
+            ResetPresentation();
+            if (weapons != null) return;
+            Unbind();
+            weapons = player.Weapons;
+            Bind();
         }
 
         private void OnEnable() { ResetPresentation(); Bind(); }
@@ -109,17 +137,28 @@ namespace ShiftFour
         }
         private void OnDroneDamage(DroneBar bar, DamageRecord damage)
         {
-            if (damage.Attacker != player || damage.Before <= damage.After || session == null || session.Ended) return;
+            if (damage.Attacker != player || damage.Before <= damage.After || !CanShowCombat) return;
             bar.RevealUntil = Time.unscaledTime + 3;
             bar.Trail = Mathf.Max(bar.Trail, damage.Before / Mathf.Max(1, bar.Health.Maximum));
             hitUntil = Time.unscaledTime + .22f;
             if (damage.Fatal) defeatUntil = Time.unscaledTime + .65f;
         }
-        private void OnShot(WeaponShot _) => shotAt = Time.unscaledTime;
+        private void OnShot(WeaponShot shot)
+        {
+            shotAt = Time.unscaledTime;
+            if (!prototype || !shot.HasHit || shot.Hit.collider == null) return;
+            var victim = shot.Hit.collider.GetComponentInParent<Health>();
+            if (victim == null || victim.LastDamage.Attacker != player || victim.LastDamage.Time != shot.Time ||
+                !victim.TryGetComponent<DroneBrain>(out _)) return;
+            victim.GetComponentInChildren<DroneRotorVisuals>()?.Effects?.Impact(shot.Hit.point, shot.Hit.normal);
+        }
+
+        private bool CanShowCombat => prototype ? player != null && player.isActiveAndEnabled && health != null && health.IsAlive :
+            session != null && !session.Ended;
 
         private void Update()
         {
-            if (session == null || player == null || health == null || !session.isActiveAndEnabled) return;
+            if (player == null || health == null || (prototype ? player.MenuBlocksInput : session == null || !session.isActiveAndEnabled)) return;
             float dt = Mathf.Min(Time.unscaledDeltaTime, .1f), now = Time.unscaledTime;
             if (!Mathf.Approximately(maximum, health.Maximum))
             { maximum = health.Maximum; DisplayedHealthFraction = DamageTrailFraction = PlayerHealthFraction; }
@@ -133,29 +172,33 @@ namespace ShiftFour
         private void UpdateDroneBars(float dt, float now)
         {
             VisibleDroneBarCount = 0;
-            var camera = player.ViewCamera;
+            var camera = player != null ? player.ViewCamera : null;
             if (camera == null) return;
             Health aimed = null;
-            if (!session.Ended && Physics.Raycast(camera.transform.position, camera.transform.forward, out var aim,
-                30, WeaponController.GameplayRaycastMask, QueryTriggerInteraction.Ignore)) aimed = aim.collider.GetComponentInParent<Health>();
+            bool show = CanShowCombat;
+            float range = prototype ? identificationRange : 30f;
+            if (show && (!prototype || droneIdentification != Identification.Off) && Physics.Raycast(camera.transform.position, camera.transform.forward, out var aim,
+                range, WeaponController.GameplayRaycastMask, QueryTriggerInteraction.Ignore)) aimed = aim.collider.GetComponentInParent<Health>();
             foreach (var bar in drones)
             {
                 bar.Visible = false;
-                if (session.Ended || bar.Brain == null || bar.Health == null || !bar.Health.IsAlive)
+                if (!show || bar.Brain == null || bar.Health == null || !bar.Health.IsAlive)
                 { bar.Alpha = 0; continue; }
                 if (aimed == bar.Health) bar.RevealUntil = Mathf.Max(bar.RevealUntil, now + .65f);
-                bool reveal = now < bar.RevealUntil;
+                bool nearby = prototype && droneIdentification == Identification.VisibleNearby &&
+                    (bar.Brain.transform.position - camera.transform.position).sqrMagnitude < Mathf.Min(144f, range * range);
+                bool reveal = nearby || now < bar.RevealUntil;
                 bar.Alpha = Mathf.MoveTowards(bar.Alpha, reveal ? 1 : 0, dt * (reveal ? 9 : 4));
                 if (bar.Alpha <= 0) continue;
                 Vector3 center = bar.Brain.transform.TransformPoint(bar.Body != null ? bar.Body.EnvelopeCenter : Vector3.up * 1.5f);
                 Vector3 anchor = center + Vector3.up * (bar.Body != null ? bar.Body.EnvelopeExtents.y + .22f : .8f);
                 var screen = camera.WorldToViewportPoint(anchor);
                 Vector3 ray = center - camera.transform.position;
-                if (screen.z <= camera.nearClipPlane || screen.x < 0 || screen.x > 1 || screen.y < 0 || screen.y > 1 || ray.sqrMagnitude > 900)
+                if (screen.z <= camera.nearClipPlane || screen.x < 0 || screen.x > 1 || screen.y < 0 || screen.y > 1 || ray.sqrMagnitude > range * range)
                     continue;
                 // Check the solid body, not the floating label anchor. Other actors also occlude the bar.
-                if (!Physics.Raycast(camera.transform.position, ray.normalized, out var hit, ray.magnitude + .1f,
-                    WeaponController.GameplayRaycastMask, QueryTriggerInteraction.Ignore) || hit.collider.GetComponentInParent<Health>() != bar.Health)
+                if ((!prototype || aimed != bar.Health) && (!Physics.Raycast(camera.transform.position, ray.normalized, out var hit, ray.magnitude + .1f,
+                    WeaponController.GameplayRaycastMask, QueryTriggerInteraction.Ignore) || hit.collider.GetComponentInParent<Health>() != bar.Health))
                     continue;
                 if (!Mathf.Approximately(bar.Maximum, bar.Health.Maximum))
                 { bar.Maximum = bar.Health.Maximum; bar.Fraction = bar.Trail = bar.Health.Current / Mathf.Max(1, bar.Maximum); }
@@ -179,6 +222,12 @@ namespace ShiftFour
         }
         private void OnGUI()
         {
+            if (prototype)
+            {
+                if (player != null && !player.MenuBlocksInput && CanShowCombat && Event.current.type == EventType.Repaint)
+                    presentation.DrawPrototype(drones, health, DisplayedHealthFraction, DamageTrailFraction, IsRecovering, player.Weapons?.ActiveWeapon, droneIdentification != Identification.Off);
+                return;
+            }
             if (session == null || !session.isActiveAndEnabled || player == null || health == null) return;
             if (Event.current.type != EventType.Repaint && !session.Ended &&
                 session.Phase != GameSession.LaunchPhase.NameEntry &&

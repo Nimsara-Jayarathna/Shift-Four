@@ -1,0 +1,5 @@
+Unity 6000.6.4f1
+Mac OS X 27.0.1
+Apple M1, 8192 MB
+Apple M1, Metal
+640 x 480

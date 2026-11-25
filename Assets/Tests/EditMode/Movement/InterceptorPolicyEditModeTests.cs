@@ -145,6 +145,20 @@ namespace ShiftFour.Tests
             Tick(8.8f, false, Vector3.one * 200);
             Assert.That(Selected, Is.EqualTo(-1));
         }
+
+        [Test] public void ExpiredUnseenIntercept_RecordsMissEvenWhenDroneHasNotArrived()
+        {
+            Straight();
+            Assert.That(State, Is.EqualTo("InterceptAhead"));
+            Vector3 junction = destination;
+            Assert.That(Vector3.Distance(drone, junction), Is.GreaterThan(1.1f));
+            const BindingFlags fields = BindingFlags.Instance | BindingFlags.NonPublic;
+            float deadline = (float)type.GetField("predictionDeadline", fields).GetValue(policy);
+            Tick(deadline, false, Vector3.one * 1000);
+            Assert.That((int)Get("FailedAttempts"), Is.EqualTo(1));
+            Assert.That(Selected, Is.EqualTo(-1));
+            Assert.That(Get("Reason").ToString(), Does.Contain("window missed"));
+        }
         [Test] public void RepeatedUpdates_KeepCommitmentWithoutExtendingArrivalWindow()
         {
             Straight(); int selected = Selected;
@@ -204,6 +218,44 @@ namespace ShiftFour.Tests
             routes = (a, b) => b.x >= 10 ? null : new[] { a, b };
             Tick(2.1f, true, Vector3.right * 4.2f);
             Assert.That(Selected, Is.EqualTo(-1)); Assert.That(Get("Reason").ToString(), Does.Contain("unreachable"));
+        }
+
+        [Test] public void BlockedCommitment_DoesNotSelectAnotherJunctionWithoutSight()
+        {
+            nodes[1] = new Vector3(11f, 0f, 0f);
+            Straight();
+            Vector3 blocked = destination;
+            Assert.That(Selected, Is.GreaterThanOrEqualTo(0));
+            routes = (a, b) => b == blocked ? null : new[] { a, b };
+            Tick(1.95f, false, Vector3.one * 9999);
+            Assert.That(Selected, Is.EqualTo(-1));
+            Assert.That((int)Get("Replans"), Is.GreaterThan(0));
+            Assert.That(destination.x, Is.EqualTo(3.6f).Within(.001f));
+            Assert.That((Vector3)Get("LastObserved"), Is.EqualTo(destination));
+
+            // Reacquiring the player allows a new validated choice, but does not
+            // immediately retry the blocked junction on the same topology.
+            routes = (a, b) => new[] { a, b };
+            Tick(2.1f, true, Vector3.right * 4.2f);
+            Assert.That(State, Is.EqualTo("InterceptAhead"));
+            Assert.That(destination, Is.Not.EqualTo(blocked));
+            TestContext.Out.WriteLine($"Reacquired: {destination}, confidence {Confidence:F2}, " +
+                $"ETA player {Get("PlayerArrival")}, drone {Get("DroneArrival")}, replans {Get("Replans")}");
+        }
+
+        [Test] public void RouteValidation_SkipsDroneQueryForOffHeadingJunction()
+        {
+            nodes = new[] { new Vector3(-10f, 0f, 0f), new Vector3(10f, 0f, 0f) };
+            int backwardsQueries = 0;
+            routes = (a, b) =>
+            {
+                if (b == nodes[0]) backwardsQueries++;
+                return new[] { a, b };
+            };
+            Straight();
+            Assert.That(backwardsQueries, Is.Zero);
+            Assert.That(State, Is.EqualTo("InterceptAhead"));
+            Assert.That(((ICollection)Get("Rejected")).Count, Is.GreaterThan(0));
         }
         [Test] public void ImmediateVisibleThreat_BypassesCommittedPrediction()
         {

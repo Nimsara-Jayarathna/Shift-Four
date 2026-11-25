@@ -1,0 +1,100 @@
+Deployed 4/4   Available 4
+Active response slots 1/2
+01   Patrol  ·  AreaSecurity
+       Patrol · Patrol post 4
+02   Intercept  ·  Primary
+       Intercept · Intercept ahead on road
+03   Patrol  ·  AreaSecurity
+       Patrol · Patrol post 4
+04   Patrol  ·  AreaSecurity
+       Patrol · Patrol post 4
+
+Last sighting (0.0, 0.1, 29.4) · 0.2 s ago
+Velocity (0.00, 0.00, 2.99) m/s
+Acceleration (0.00, 0.00, 0.00) m/s²
+Confidence 1.00  ·  Uncertainty 0.27 m
+Continue  ·  support 89 %  ·  weight 89 %
+Stop  ·  support 11 %  ·  weight 11 %
+Junction 15 (0.0, 0.2, 34.6)  ·  Continue
+Player ETA 1.74s   Unit ETA 0.43s
+Prediction state InterceptAhead  ·  Replans 0  ·  Expired attempts 0
+
+Intercept  ·  score 1.00  ·  commit 0.00s
+Validated path and feasible ETA  ·  Previous action unavailable or complete
+Eligible actions show total, evidence, travel, uncertainty and stability
+Patrol  ·  Response in progress
+ObserveTarget   0.47   0.47   0.00   0.00   0.00
+Intercept   1.00   1.15   0.05   0.02   0.05
+PursueLastKnown  ·  No validated recent evidence
+InvestigateSound  ·  No reachable fresh sound
+SearchBeliefRegion  ·  No useful reachable region
+Reposition  ·  No clear reposition point
+ReturnToPatrol  ·  Response still useful
+Attack  ·  Requires confirmed sight, range, and a ready burst
+BELIEF   2 regions  ·  entropy 0.57  ·  search 0.0s
+Region 10  74 %  ·  DirectVisual  ·  Unexamined
+Region 11  26 %  ·  DirectVisual  ·  Unexamined
+
+SQUAD COORDINATION
+Configured 4  Spawned 4  Available 4
+Responses 1/2  Shared observations 5
+Newest observation 0.4s ago
+Group value 1.06  Combinations 2
+Updates 8  Reassignments 0
+01  Patrol / AreaSecurity  |  Patrol 0.60
+     (-37.4, 0.2, -46.5)  |  PathComplete
+     Proposals —
+02  Intercept / Primary  |  Intercept 1.00
+     (0.0, 0.2, 34.6)  |  PathComplete
+     #2 expires in 0.7s  ETA 0.4s
+     Proposals  Intercept 0.96
+03  Patrol / AreaSecurity  |  Patrol 0.60
+     (32.8, 0.2, 53.5)  |  PathComplete
+     Proposals —
+04  Patrol / AreaSecurity  |  Patrol 0.60
+     (55.8, 0.2, -63.4)  |  PathComplete
+     Proposals —
+
+Following  ·  Chase  ·  Path PathComplete
+Actual 6.97 m/s  ·  Target 7.67 m/s  ·  Graph v2
+Replans 3  ·  Block None
+> Waypoint 1  (0.0, 0.2, 34.6)
+Awaiting next traced route query
+Flight Braking   |   Sensor Intercept   |   Rotor 400 rpm
+Forward accel -24.3 m/s²   |   Yaw 8°/s   |   Hover -0.1 cm
+Pose pitch 1.5° / bank -2.0°   |   Hit 0 %   |   Wreck Live
+
+ADAPTIVE MEMORY  ·  Interceptor 02
+Learning rate 0.12
+Evaluated 0  ·  Unevaluated 0  ·  Pending 2
+Successful 0  ·  Failed 0
+Recent mean error —
+Horizon 3.91 s  ·  Motion uncertainty 0.27 m
+Direction changes 0 %  ·  Stops 0 %  ·  Reversals 0 %
+Observed speed 3.0 m/s  ·  Variability 0.3 m/s
+HYPOTHESIS  |  SUPPORT → WEIGHT  |  RELIABILITY  |  LAST ERROR
+Continue    89 % → 89 %      0.65  —
+Left        —                0.65  —
+Right       —                0.65  —
+Stop        11 % → 11 %      0.65  —
+Reverse     —                0.65  —
+Alternate   —                0.65  —
+Waiting for evaluated evidence
+Tactical memory 0/64  ·  Recent failed destinations 0
+
+Editor/game frame 43.7 ms
+Selected unit's last tactical plan: 2 fresh route queries
+Inclusive scene timings · mean / peak per sampled active frame
+Decision  N/A
+Interceptor.TacticalPlan  N/A
+FindRoute  N/A
+CanConnect  N/A
+Interceptor.RouteValidation  N/A
+InterceptorCoordination  N/A
+InterceptorAssignment  N/A
+PredictionEvaluation  N/A
+InterceptorLearning  N/A
+DroneMotor  N/A
+DroneBody  N/A
+DroneAnimation  N/A
+

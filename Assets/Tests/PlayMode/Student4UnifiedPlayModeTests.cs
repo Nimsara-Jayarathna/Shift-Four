@@ -57,7 +57,13 @@ namespace ShiftFour.Tests
         [UnityTest] public IEnumerator All400GateEndpointQueries_MatchIndependentDijkstra()
         {
             int n=(int)Get(graph,"NodeCount");var nodes=Enumerable.Range(0,n).Select(i=>(Vector3)Call(graph,"NodePosition",i)).ToArray();var edges=(Array)Field(graph,"edges");
-            string csv="mask,start,goal,expected_cost,actual_cost,returned_waypoints,result\n";int errors=0;
+            var traceType = graph.GetType().GetNestedType("SearchTrace", BindingFlags.NonPublic);
+            var trace = Activator.CreateInstance(traceType, nonPublic: true);
+            var visits = (IList)Field(trace, "Visits");
+            var search = Method(graph, "FindRouteWithTrace");
+            var arguments = new object[] { nodes[0], nodes[0], trace };
+            search.Invoke(graph, arguments);
+            string csv="mask,start,goal,expected_cost,actual_cost,expanded_nodes,elapsed_us,returned_waypoints,result\n";int errors=0;
             for(int mask=0;mask<16;mask++)
             {
                 for(int k=0;k<4;k++)Call(graph,"SetGateOpen",k,(mask&(1<<k))!=0);
@@ -75,12 +81,25 @@ namespace ShiftFour.Tests
                             if(next>=0)cost[next]=Mathf.Min(cost[next],cost[at]+Vector3.Distance(nodes[at],nodes[next]));
                         }
                     }
-                    var path=Route(nodes[start],nodes[goal]);float actual=0;Vector3 previous=nodes[start];
+                    arguments[0] = nodes[start];
+                    arguments[1] = nodes[goal];
+                    long before = Stopwatch.GetTimestamp();
+                    var path = (List<Vector3>)search.Invoke(graph, arguments);
+                    double elapsedUs = (Stopwatch.GetTimestamp() - before) * 1e6 / Stopwatch.Frequency;
+                    foreach (object visit in visits)
+                    {
+                        int node = (int)Field(visit, "Node"), parent = (int)Field(visit, "Parent");
+                        Assert.That((float)Field(visit, "H"), Is.EqualTo(Vector3.Distance(nodes[node], nodes[goal])).Within(.001f));
+                        Assert.That((float)Field(visit, "G"), Is.GreaterThanOrEqualTo(0f));
+                        Assert.That(parent, Is.InRange(-1, n - 1));
+                    }
+                    float actual=0;Vector3 previous=nodes[start];
                     foreach(var p in path){actual+=Vector3.Distance(previous,p);previous=p;}
                     if(path.Count==0)actual=float.PositiveInfinity;
                     bool pass=(float.IsPositiveInfinity(cost[goal])&&float.IsPositiveInfinity(actual))||Mathf.Abs(cost[goal]-actual)<.001f;
                     if(!pass)errors++;
-                    csv+=string.Format(CultureInfo.InvariantCulture,"{0},{1},{2},{3},{4},{5},{6}\n",mask,start,goal,cost[goal],actual,string.Join(";",path.Select(V)),pass?"PASS":"FAIL");
+                    if (path.Count > 0) Assert.That(path[path.Count - 1], Is.EqualTo(nodes[goal]));
+                    csv += FormattableString.Invariant($"{mask},{start},{goal},{cost[goal]},{actual},{visits.Count},{elapsedUs:F3},{string.Join(";", path.Select(V))},{(pass ? "PASS" : "FAIL")}\n");
                     if(!float.IsPositiveInfinity(cost[goal]))Assert.That(Vector3.Distance(nodes[start],nodes[goal]),Is.LessThanOrEqualTo(cost[goal]+.001f),"admissible h");
                 }
             }

@@ -14,15 +14,25 @@ namespace ShiftFour
         [SerializeField, Range(0f, 1f)] private float droneFlightVolume = .45f;
         [SerializeField, Range(0f, 1f)] private float backgroundMusicVolume = .12f;
         [SerializeField, Range(0f, 1f)] private float reloadVolume = .65f;
+        private float musicGain = 1f, effectsGain = 1f;
+        internal float EffectsGain => effectsGain;
+        private readonly float[] voiceLevels = new float[VoiceCapacity];
         private AudioSource backgroundMusic;
         private AudioSource reloadSource;
         private AudioClip reloadClip;
         private WeaponController weapons;
         private readonly Dictionary<LabDoor, AudioSource> doorSources = new Dictionary<LabDoor, AudioSource>();
         private AudioClip playerShot, droneShot, doorOpen;
-        private AudioClip droneFlight;
-        private AudioSource[] flightSources;
-        private Health[] flightHealth;
+        private AudioClip droneFlight, advisory, relay;
+        [System.Serializable]
+        private struct FlightLoop
+        {
+            public AudioSource Source;
+            public Health Health;
+            public DroneRotorVisuals InterceptorVisuals;
+        }
+
+        private FlightLoop[] flightLoops = System.Array.Empty<FlightLoop>();
         private AudioSource[] voices;
         private LabDoor[] doors;
         private PlayerController player;
@@ -58,7 +68,7 @@ namespace ShiftFour
                 backgroundMusic.clip = musicClip;
                 backgroundMusic.loop = true; backgroundMusic.playOnAwake = false;
                 backgroundMusic.spatialBlend = 0f; backgroundMusic.dopplerLevel = 0f;
-                backgroundMusic.volume = backgroundMusicVolume;
+                backgroundMusic.volume = backgroundMusicVolume * musicGain;
                 backgroundMusic.priority = 192;
             }
         }
@@ -75,7 +85,7 @@ namespace ShiftFour
                 camera.gameObject.AddComponent<AudioListener>();
             InitializeDedicatedSources();
             if (isActiveAndEnabled) { BindDoors(true); BindWeapon(true); }
-            InitializeFlightLoops();
+            BindFlightLoops(FindObjectsByType<DroneBrain>());
         }
 
         private void InitializeDedicatedSources()
@@ -89,7 +99,7 @@ namespace ShiftFour
                     child.transform.localPosition = Vector3.up * 1.2f;
                     var source = child.AddComponent<AudioSource>();
                     source.clip = doorOpen; source.playOnAwake = false;
-                    source.spatialBlend = 1f; source.volume = doorVolume; source.dopplerLevel = 0f;
+                    source.spatialBlend = 1f; source.volume = doorVolume * effectsGain; source.dopplerLevel = 0f;
                     source.minDistance = 8f; source.maxDistance = 50f;
                     source.rolloffMode = AudioRolloffMode.Linear; source.priority = 32;
                     doorSources.Add(door, source);
@@ -100,7 +110,7 @@ namespace ShiftFour
                 child.transform.SetParent(player.transform, false);
                 reloadSource = child.AddComponent<AudioSource>();
                 reloadSource.clip = reloadClip; reloadSource.playOnAwake = false;
-                reloadSource.spatialBlend = 0f; reloadSource.volume = reloadVolume;
+                reloadSource.spatialBlend = 0f; reloadSource.volume = reloadVolume * effectsGain;
                 reloadSource.dopplerLevel = 0f; reloadSource.priority = 64;
             }
         }
@@ -130,36 +140,48 @@ namespace ShiftFour
             ReloadsPlayed++;
         }
 
-        private void InitializeFlightLoops()
+        internal void BindFlightLoops(DroneBrain[] drones)
         {
             ClearFlightLoops();
             if (droneFlight == null) return;
-            var drones = FindObjectsByType<DroneBrain>();
-            flightSources = new AudioSource[drones.Length];
-            flightHealth = new Health[drones.Length];
+            var loops = new FlightLoop[drones.Length];
             for (int i = 0; i < drones.Length; i++)
             {
+                var drone = drones[i];
+                if (drone == null) continue;
                 var loop = new GameObject("Drone flight loop");
-                loop.transform.SetParent(drones[i].transform, false);
-                var source = flightSources[i] = loop.AddComponent<AudioSource>();
-                flightHealth[i] = drones[i].GetComponent<Health>();
+                loop.transform.SetParent(drone.transform, false);
+                var source = loop.AddComponent<AudioSource>();
+                DroneRotorVisuals visual = null;
+                if (drone is InterceptorBrain)
+                {
+                    advisory ??= Resources.Load<AudioClip>("Audio/Halls/Advisory");
+                    relay ??= Resources.Load<AudioClip>("Audio/Halls/Relay");
+                    visual = drone.GetComponentInChildren<DroneRotorVisuals>();
+                    if (visual != null) visual.AudioBus = this;
+                }
                 source.clip = droneFlight; source.loop = true; source.playOnAwake = false;
-                source.spatialBlend = 1f; source.volume = droneFlightVolume; source.dopplerLevel = 0f;
+                source.spatialBlend = 1f; source.volume = droneFlightVolume * effectsGain; source.dopplerLevel = 0f;
                 source.minDistance = 4f; source.maxDistance = 28f;
                 source.rolloffMode = AudioRolloffMode.Logarithmic;
+                loops[i] = new FlightLoop { Source = source, Health = drone.GetComponent<Health>(), InterceptorVisuals = visual };
             }
+            flightLoops = loops;
         }
 
         private void Update()
         {
-            if (flightSources == null) return;
+            if (AudioListener.pause) return;
             bool ended = GameSession.Instance != null && GameSession.Instance.Ended;
-            for (int i = 0; i < flightSources.Length; i++)
+            foreach (var loop in flightLoops)
             {
-                var source = flightSources[i];
+                var source = loop.Source;
                 if (source == null) continue;
                 bool flying = !ended && source.gameObject.activeInHierarchy &&
-                    flightHealth[i] != null && flightHealth[i].IsAlive;
+                    loop.Health != null && loop.Health.IsAlive;
+                if (flying && loop.InterceptorVisuals != null)
+                    source.pitch = Mathf.Lerp(source.pitch, .91f + .22f * Mathf.Clamp01(loop.InterceptorVisuals.MovementSpeed / 7f),
+                        1f - Mathf.Exp(-4f * Time.deltaTime));
                 if (flying && !source.isPlaying) source.Play();
                 else if (!flying && source.isPlaying) source.Stop();
             }
@@ -167,10 +189,12 @@ namespace ShiftFour
 
         private void ClearFlightLoops()
         {
-            if (flightSources != null)
-                foreach (var source in flightSources)
-                    if (source != null) { source.Stop(); Destroy(source.gameObject); }
-            flightSources = null; flightHealth = null;
+            foreach (var loop in flightLoops)
+            {
+                if (loop.Source != null) { loop.Source.Stop(); Destroy(loop.Source.gameObject); }
+                if (loop.InterceptorVisuals != null) loop.InterceptorVisuals.AudioBus = null;
+            }
+            flightLoops = System.Array.Empty<FlightLoop>();
         }
 
         private void OnDestroy()
@@ -182,6 +206,7 @@ namespace ShiftFour
 
         private void OnEnable()
         {
+            flightLoops ??= System.Array.Empty<FlightLoop>();
             SoundEvents.NoiseEmitted += OnNoise; BindDoors(true); BindWeapon(true);
             if (backgroundMusic != null && !backgroundMusic.isPlaying) backgroundMusic.Play();
         }
@@ -189,7 +214,8 @@ namespace ShiftFour
         {
             SoundEvents.NoiseEmitted -= OnNoise; BindDoors(false); BindWeapon(false);
             if (voices != null) foreach (var voice in voices) if (voice != null) voice.Stop();
-            if (flightSources != null) foreach (var source in flightSources) if (source != null) source.Stop();
+            foreach (var loop in flightLoops)
+                if (loop.Source != null) loop.Source.Stop();
             if (backgroundMusic != null) backgroundMusic.Stop();
             if (reloadSource != null) reloadSource.Stop();
             foreach (var source in doorSources.Values) if (source != null) source.Stop();
@@ -212,6 +238,34 @@ namespace ShiftFour
             if (!Play(drone ? droneShot : playerShot, noise.Position, drone ? droneShotVolume : playerShotVolume, !local)) return;
             if (drone) DroneShotsPlayed++; else PlayerShotsPlayed++;
         }
+        internal void PreviewSettingsMusic(bool enabled)
+        {
+            if (backgroundMusic != null) backgroundMusic.ignoreListenerPause = enabled;
+        }
+
+        internal void SetCategoryVolumes(float music, float effects)
+        {
+            musicGain = Mathf.Clamp01(music);
+            effectsGain = Mathf.Clamp01(effects);
+            if (backgroundMusic != null) backgroundMusic.volume = backgroundMusicVolume * musicGain;
+            if (reloadSource != null) reloadSource.volume = reloadVolume * effectsGain;
+            foreach (var source in doorSources.Values)
+                if (source != null) source.volume = doorVolume * effectsGain;
+            foreach (var loop in flightLoops)
+                if (loop.Source != null) loop.Source.volume = droneFlightVolume * effectsGain;
+            if (voices != null)
+                for (int i = 0; i < voices.Length; i++) voices[i].volume = voiceLevels[i] * effectsGain;
+        }
+
+        internal void InterceptorAlert(Vector3 point) => Play(advisory, point, .21f, true, 1.18f);
+        internal void InterceptorFailure(Vector3 point) => Play(relay, point, .22f, true, .78f);
+        internal void InterceptorImpact(Vector3 point) => Play(relay, point, .36f, true, .62f);
+
+        internal void PlayOutdoorDoor(Vector3 position)
+        {
+            if (Play(doorOpen, position, doorVolume, true)) DoorsPlayed++;
+        }
+
         private void OnDoor(LabDoor door)
         {
             if (!doorSources.TryGetValue(door, out var source) || source == null || source.clip == null) return;
@@ -231,7 +285,8 @@ namespace ShiftFour
             }
             var voice = voices[slot]; nextVoice = (slot + 1) % voices.Length;
             voice.Stop(); voice.transform.position = position;
-            voice.clip = clip; voice.volume = volume; voice.pitch = pitch;
+            voiceLevels[slot] = volume;
+            voice.clip = clip; voice.volume = volume * effectsGain; voice.pitch = pitch;
             voice.spatialBlend = spatial ? 1f : 0f; voice.Play();
             return true;
         }

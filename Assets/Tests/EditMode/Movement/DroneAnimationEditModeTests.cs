@@ -111,6 +111,29 @@ namespace ShiftFour.Tests
             Assert.That(travel, Is.EqualTo(.8f / 4f).Within(.0003f));
         }
 
+        [TestCase("Guard", 3f)] [TestCase("Scout", 8f)]
+        [TestCase("Flanker", 12f)] [TestCase("Interceptor", 14f)]
+        public void OutdoorRole_LeansIntoAccelerationLevelsOutAndBrakes(string role, float limit)
+        {
+            object pose = New();
+            var preset = PoseType.GetProperty("Role");
+            preset.SetValue(pose, Enum.Parse(preset.PropertyType, role));
+            Assert.That(Value(pose, "TiltLimit"), Is.EqualTo(limit));
+            Call(pose, "SetAcceleration", 1f);
+            Call(pose, "SetFlightCues", .9f, false);
+            for (int i = 0; i < 40; i++) Step(pose, 1f / 60f, Vector3.forward, 45f);
+            Assert.That(Value(pose, "Pitch"), Is.GreaterThan(limit * .8f));
+            Assert.That(Value(pose, "Bank"), Is.LessThan(-limit * .5f));
+            float powered = Value(pose, "RotorSpeed");
+            Call(pose, "SetAcceleration", 0f);
+            Call(pose, "SetFlightCues", 0f, false);
+            for (int i = 0; i < 90; i++) Step(pose, 1f / 60f, Vector3.forward);
+            Assert.That(Mathf.Abs(Value(pose, "Bank")), Is.LessThan(.01f));
+            Assert.That(Value(pose, "RotorSpeed"), Is.LessThan(powered));
+            for (int i = 0; i < 6; i++) Step(pose, 1f / 60f, Vector3.zero);
+            Assert.That(Value(pose, "Pitch"), Is.LessThan(0f), "Braking raises the nose");
+        }
+
         [Test]
         public void PausedTime_DoesNotAdvancePoseOrFeedback()
         {

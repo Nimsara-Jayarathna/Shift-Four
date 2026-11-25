@@ -17,37 +17,53 @@ namespace ShiftFour
         [SerializeField, Min(0.01f)] private float clearance = .04f;
         private NavMeshAgent agent;
         private DroneMotor motor;
+        private CapsuleCollider hitbox;
         private Collider blocker;
+        private Collider detourBlocker;
         private readonly Collider[] overlaps = new Collider[32];
         private readonly RaycastHit[] sweepHits = new RaycastHit[32];
         private Vector3 avoidanceHeading;
         private float clearanceSpeed;
-        private bool detouring;
+        private bool detouring, syncBeforeSweep;
         private Vector3 detourPoint;
+        private float flightOffset;
         private static readonly float[] AvoidanceAngles = { 30f, -30f, 60f, -60f, 90f, -90f, 120f, -120f };
         public bool MotionBlocked { get; private set; }
+        internal Collider BlockingCollider => blocker != null ? blocker : detouring ? detourBlocker : null;
+        internal bool BlockedByActor => blocker != null &&
+            (blocker is CharacterController || blocker.GetComponentInParent<DroneBody>() != null);
         public float HorizontalRadius => Mathf.Max(envelopeExtents.x, envelopeExtents.z);
-        public Vector3 EnvelopeCenter => envelopeCenter;
+        public Vector3 EnvelopeCenter => envelopeCenter + Vector3.up * flightOffset;
         public Vector3 EnvelopeExtents => envelopeExtents;
+
+        internal void SetFlightOffset(float offset)
+        {
+            var collision = GetComponent<CapsuleCollider>();
+            collision.center += Vector3.up * (offset - flightOffset);
+            flightOffset = offset;
+        }
 
         private void Awake()
         {
             agent = GetComponent<NavMeshAgent>();
             motor = GetComponent<DroneMotor>();
+            hitbox = GetComponent<CapsuleCollider>();
             agent.updatePosition = false;
         }
 
         private bool External(Collider other)
             => other != null && !other.transform.IsChildOf(transform) &&
-                !Physics.GetIgnoreLayerCollision(gameObject.layer, other.gameObject.layer);
+                !Physics.GetIgnoreLayerCollision(gameObject.layer, other.gameObject.layer) &&
+                // Scene queries do not honor the wreck rig's pairwise actor exclusions.
+                (hitbox == null || !Physics.GetIgnoreCollision(hitbox, other));
 
         public bool CanOccupy(Vector3 position)
         {
-            int count=Physics.OverlapBoxNonAlloc(position+envelopeCenter,envelopeExtents,overlaps,
+            int count=Physics.OverlapBoxNonAlloc(position+EnvelopeCenter,envelopeExtents,overlaps,
                 Quaternion.identity,~0,QueryTriggerInteraction.Ignore);
             // A full buffer may have omitted the blocker. Fall back to all hits rather than
             // silently accepting a truncated query in a crowded/dynamically extended scene.
-            Collider[] hits=count==overlaps.Length ? Physics.OverlapBox(position+envelopeCenter,
+            Collider[] hits=count==overlaps.Length ? Physics.OverlapBox(position+EnvelopeCenter,
                 envelopeExtents,Quaternion.identity,~0,QueryTriggerInteraction.Ignore) : overlaps;
             if(hits!=overlaps)count=hits.Length;
             for(int i=0;i<count;i++)if(External(hits[i]))return false;
@@ -58,10 +74,16 @@ namespace ShiftFour
         {
             float distance = displacement.magnitude;
             if (distance < .00001f) return position;
+            if (syncBeforeSweep)
+            {
+                // Only bodies about to query physics need this frame's actor and door transforms.
+                using (SyncMarker.Auto()) Physics.SyncTransforms();
+                syncBeforeSweep = false;
+            }
             float allowed = distance;
-            int count=Physics.BoxCastNonAlloc(position+envelopeCenter,envelopeExtents,displacement/distance,
+            int count=Physics.BoxCastNonAlloc(position+EnvelopeCenter,envelopeExtents,displacement/distance,
                 sweepHits,Quaternion.identity,distance+clearance,~0,QueryTriggerInteraction.Ignore);
-            RaycastHit[] hits=count==sweepHits.Length ? Physics.BoxCastAll(position+envelopeCenter,
+            RaycastHit[] hits=count==sweepHits.Length ? Physics.BoxCastAll(position+EnvelopeCenter,
                 envelopeExtents,displacement/distance,Quaternion.identity,distance+clearance,~0,
                 QueryTriggerInteraction.Ignore) : sweepHits;
             if(hits!=sweepHits)count=hits.Length;
@@ -83,6 +105,7 @@ namespace ShiftFour
             // raised wings cannot clear, without changing the graph route or crossing NavMesh edges.
             // Players, other drones and security doors are temporary holds, never detour shortcuts.
             if (!CanDetour(blocker)) return safe;
+            Collider obstacle = blocker;
             Vector3 forward = agent.steeringTarget - start;
             forward.y = 0f;
             if (forward.sqrMagnitude < .01f) return safe;
@@ -106,6 +129,7 @@ namespace ShiftFour
             if (best == Vector3.zero) return safe;
             avoidanceHeading = best;
             detourPoint = start + best * probeDistance;
+            detourBlocker = obstacle;
             detouring = true;
             return start + best * Mathf.Min(travel, probeDistance);
         }
@@ -113,14 +137,15 @@ namespace ShiftFour
         private static bool CanDetour(Collider obstacle)
             => obstacle != null && obstacle.GetComponentInParent<PlayerController>() == null &&
                 !(obstacle is CharacterController) && obstacle.GetComponentInParent<DroneBody>() == null &&
-                obstacle.GetComponentInParent<LabDoor>() == null;
+                obstacle.GetComponentInParent<LabDoor>() == null &&
+                obstacle.GetComponentInParent<BuildingAccessDoor>() == null &&
+                obstacle.GetComponentInParent<CheckpointAccessDoor>() == null;
 
         private void LateUpdate()
         {
             if (!agent.isActiveAndEnabled || !agent.isOnNavMesh || (motor != null && !motor.enabled)) return;
             using var sample = BodyMarker.Auto();
-            using (SyncMarker.Auto())
-                Physics.SyncTransforms(); // Includes this frame's CharacterController movement and opening gates.
+            syncBeforeSweep = true;
             Vector3 start = transform.position;
             Vector3 desired = agent.nextPosition;
             blocker = null;
@@ -152,8 +177,12 @@ namespace ShiftFour
                 else clearanceSpeed = agent.velocity.magnitude;
             }
             // Never project/warp a collision correction across an edge or a carved gate.
-            if (agent.Raycast(safe, out _)) safe = start;
-            transform.position = safe;
+            if (agent.Raycast(safe, out _))
+            {
+                safe = start;
+                MotionBlocked = true;
+            }
+            if (!safe.Equals(start)) transform.position = safe;
             agent.nextPosition = safe;
             if (MotionBlocked) agent.velocity = Vector3.zero;
         }

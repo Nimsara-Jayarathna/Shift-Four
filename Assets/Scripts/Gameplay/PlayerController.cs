@@ -13,6 +13,7 @@ namespace ShiftFour
         [SerializeField, Min(.1f), Tooltip("Downward acceleration in metres per second squared.")]
         private float gravity = 20f;
         [SerializeField] private float mouseSensitivity = 2f;
+        internal float MouseSensitivity { get => mouseSensitivity; set => mouseSensitivity = Mathf.Clamp(value, .2f, 5f); }
         [SerializeField] private MovementNoiseCadence movementNoise = new MovementNoiseCadence();
 
         private CharacterController controller;
@@ -20,6 +21,7 @@ namespace ShiftFour
         private float pitch;
         private float verticalSpeed;
         private WeaponController weapons;
+        private OutdoorPlayerEquipment outdoorEquipment;
         private PlayerDeathPresentation deathPresentation;
         private bool suitableGround;
         public string InteractionPrompt { get; private set; } = string.Empty;
@@ -28,7 +30,8 @@ namespace ShiftFour
         public WeaponController Weapons => weapons;
         public bool CanPresentWeapon => isActiveAndEnabled && health != null && health.IsAlive && view != null &&
             (GameSession.Instance == null || GameSession.Instance.CanPlay);
-        public bool CanAct => CanPresentWeapon && (GameSession.Instance == null || !GameSession.Instance.IsPlanting);
+        internal bool MenuBlocksInput { get; set; }
+        public bool CanAct => !MenuBlocksInput && CanPresentWeapon && (GameSession.Instance == null || !GameSession.Instance.IsPlanting);
 
         public void Configure(Camera playerCamera)
         {
@@ -61,6 +64,14 @@ namespace ShiftFour
             if (deathPresentation != null) deathPresentation.ApplyPose(view, view.transform.position);
         }
 
+        internal void ResetSpawnMotion()
+        {
+            verticalSpeed = 0f;
+            suitableGround = false;
+            movementNoise?.Reset();
+            ApplyCameraPose();
+        }
+
         private void OnValidate()
         {
             ValidateMovement();
@@ -79,7 +90,9 @@ namespace ShiftFour
             ApplyCameraPose();
             weapons = GetComponent<WeaponController>();
             if (weapons == null) weapons = gameObject.AddComponent<WeaponController>();
-            weapons.Initialize(this);
+            outdoorEquipment = GetComponent<OutdoorPlayerEquipment>();
+            weapons.Initialize(this, equipInitialWeapon: outdoorEquipment == null);
+            outdoorEquipment?.Bind(this, weapons);
             deathPresentation = GetComponent<PlayerDeathPresentation>();
             if (deathPresentation == null) deathPresentation = gameObject.AddComponent<PlayerDeathPresentation>();
             deathPresentation.Initialize(this, health);
@@ -88,19 +101,19 @@ namespace ShiftFour
         private void Start()
         {
             ApplyCameraPose();
-            if (GameSession.Instance == null || GameSession.Instance.Phase == GameSession.LaunchPhase.Playing) LockCursor();
+            if (!MenuBlocksInput && (GameSession.Instance == null || GameSession.Instance.Phase == GameSession.LaunchPhase.Playing)) LockCursor();
         }
 
         private void LateUpdate()
         {
-            if (GameSession.Instance == null || !GameSession.Instance.IsPlanting) ApplyCameraPose();
+            if (!MenuBlocksInput && (GameSession.Instance == null || !GameSession.Instance.IsPlanting)) ApplyCameraPose();
         }
 
         private void OnDisable() => movementNoise?.Reset();
 
         private void Update()
         {
-            if (GameSession.Instance != null && GameSession.Instance.Ended) { movementNoise.Reset(); return; }
+            if (MenuBlocksInput || (GameSession.Instance != null && GameSession.Instance.Ended)) { movementNoise.Reset(); return; }
             if (!health.IsAlive || view == null) { movementNoise.Reset(); return; }
             if (GameSession.Instance != null && (GameSession.Instance.IsPlanting ||
                 GameSession.Instance.Phase == GameSession.LaunchPhase.Intro))
@@ -137,7 +150,8 @@ namespace ShiftFour
             MovePlayer(move, Time.deltaTime);
 
             UpdateInteraction();
-            if (weapons != null) weapons.ProcessInput();
+            if (outdoorEquipment != null) outdoorEquipment.ProcessInput();
+            else if (weapons != null) weapons.ProcessInput();
         }
 
         private void UpdateInteraction()

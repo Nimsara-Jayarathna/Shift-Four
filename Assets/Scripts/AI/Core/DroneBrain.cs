@@ -31,12 +31,27 @@ namespace ShiftFour
         [SerializeField, Min(0f)] private float combatOriginHeight = 1.25f;
 
         private Health health;
+        private float prototypeMaximumHealth;
+        private OutdoorScoutEncounter outdoorAttackBudget;
+        private Health playerHealth;
+        private DroneCombatReadiness combatReadiness;
         private DroneMotor motor;
         private PlayerController player;
+        private WaypointGraph outdoorGraph;
+        private Vector3[] outdoorPatrol;
+        private int outdoorPost = 1;
+        private float outdoorArrivalDistance;
         private float nextDecision;
         private float nextShot;
         public bool HasCommittedToAttack { get; private set; }
         protected virtual float ShotInterval => attackInterval;
+        protected virtual float VisionDistance => visionDistance;
+        protected virtual float AttackRange => attackRange;
+        protected virtual float DamagePerShot => ShotDamage;
+        protected virtual bool CanTarget(Vector3 position) => true;
+        protected virtual bool TryAuthorizeShot() => true;
+        protected virtual void OnDefeated() { }
+        protected virtual string GeneratedPatrolLabel => "Patrol outdoor post ";
         private float lastSeenAt = float.NegativeInfinity;
         private Vector3 lastKnown;
         private Vector3 observedVelocity;
@@ -51,12 +66,19 @@ namespace ShiftFour
         public Vector3 LastShotHit { get; private set; }
 
         public string AgentName => agentName;
-        public string CurrentDecision { get; private set; } = "Idle";
+        [field: SerializeField] public string CurrentDecision { get; private set; } = "Idle";
         public Vector3 Home => home;
         public DroneDifficultyProfile DifficultyProfile => difficultyProfile;
         public float ShotDamage => (difficultyProfile != null ? DifficultySettings.shotDamage : 10f) /
             GameSession.CombatDurationMultiplier;
         public DroneDifficultySettings DifficultySettings { get; private set; }
+        internal DroneDifficultySettings MovementSettings { get; private set; }
+        internal bool CombatAlertPulse => Alive && combatReadiness != null && combatReadiness.Pulse;
+        internal bool IsAggressive => Alive && combatReadiness != null && combatReadiness.Aggressive;
+        protected bool HasPrototypeTempo => combatReadiness != null;
+        internal float PrototypeDecisionOffset { get; private set; }
+        internal float ReactionSeconds(float previous) => combatReadiness?.Tuning.reactionSeconds ?? previous;
+        internal bool ReadyForPrototypeShot => combatReadiness == null || combatReadiness.ReadyToFire;
         public DroneHearingSensor Hearing { get; private set; }
         public DroneAwareness Awareness { get; private set; }
         protected Vector3 LastKnown => lastKnown;
@@ -64,12 +86,14 @@ namespace ShiftFour
         protected Vector3 ObservedVelocity => observedVelocity;
         protected PlayerController Player => player;
         protected DroneMotor Motor => motor;
+        protected WaypointGraph NavigationGraph => outdoorGraph != null ? outdoorGraph :
+            (GameSession.Instance != null ? GameSession.Instance.Graph : null);
         protected bool Alive => health != null && health.IsAlive;
         protected virtual bool OwnsSoundInvestigation => false;
         protected virtual bool UsesImmediateSoundInvestigation => rapidSoundResponse;
         public float DecisionInterval => float.IsNaN(decisionInterval) || float.IsInfinity(decisionInterval)
             ? .08f : Mathf.Clamp(decisionInterval, .02f, .3f);
-        private Vector3 CombatOrigin => weaponMount != null ? weaponMount.MuzzlePosition :
+        protected Vector3 CombatOrigin => weaponMount != null ? weaponMount.MuzzlePosition :
             transform.position + Vector3.up * combatOriginHeight;
 
         public void Configure(string label, Vector3 post)
@@ -78,16 +102,47 @@ namespace ShiftFour
             home = post;
         }
 
+        internal void ConfigurePrototypeCombat(DroneCombatTempo tuning, int slot, float maximumHealth,
+            OutdoorScoutEncounter attackBudget)
+        {
+            combatReadiness = new DroneCombatReadiness(tuning);
+            prototypeMaximumHealth = maximumHealth;
+            outdoorAttackBudget = attackBudget;
+            PrototypeDecisionOffset = slot * .009f;
+            nextDecision = Time.time + PrototypeDecisionOffset;
+        }
+        internal void ReactToThreat() { if (Alive) combatReadiness?.React(); }
+        internal void ConfirmPrototypeSight() { if (Alive) combatReadiness?.ConfirmSight(); }
+        internal virtual bool CanReactToGunfire(Vector3 position) => true;
+
+        internal void ConfigureOutdoor(PlayerController target, WaypointGraph graph, Vector3[] patrol)
+        {
+            player = target;
+            outdoorGraph = graph;
+            outdoorPatrol = patrol;
+            outdoorArrivalDistance = GetComponent<UnityEngine.AI.NavMeshAgent>().stoppingDistance + .2f;
+            GetComponent<DroneMotor>().BindOutdoorNavigation(graph);
+        }
+
         protected virtual void Start()
         {
             health = GetComponent<Health>();
             motor = GetComponent<DroneMotor>();
-            player = GameSession.Instance != null ? GameSession.Instance.Player : null;
+            if (outdoorPatrol == null)
+                player = GameSession.Instance != null ? GameSession.Instance.Player : null;
+            playerHealth = player != null ? player.GetComponent<Health>() : null;
             weaponMount = GetComponentInChildren<DroneRotorVisuals>()?.WeaponMount;
+            if (outdoorPatrol != null && (outdoorGraph == null || outdoorPatrol.Length < 2 ||
+                playerHealth == null || weaponMount == null))
+            {
+                Debug.LogWarning($"Open World: {agentName} could not initialize. Check patrol, graph, player Health and weapon mount.", this);
+                enabled = false;
+                return;
+            }
             health.Died += OnDied;
             lastKnown = home;
             InitializeDifficulty();
-            if (difficultyProfile != null) motor.InitializeMovement(DifficultySettings);
+            if (difficultyProfile != null) motor.InitializeMovement(MovementSettings);
             var response = awarenessSettings.Validated();
             if (UsesImmediateSoundInvestigation)
             {
@@ -100,7 +155,7 @@ namespace ShiftFour
             if (!health.IsAlive) Awareness.Disable();
             Hearing = GetComponent<DroneHearingSensor>();
             if (Hearing == null) Hearing = gameObject.AddComponent<DroneHearingSensor>();
-            Hearing.Configure(GameSession.Instance != null ? GameSession.Instance.Graph : null,
+            Hearing.Configure(NavigationGraph,
                 difficultyProfile != null ? DifficultySettings.hearingSensitivity : 1f);
             if (rapidSoundResponse) Hearing.EnableRapidResponse();
             Hearing.ObservationAccepted += OnHeard;
@@ -108,7 +163,8 @@ namespace ShiftFour
 
         private void OnHeard(SoundObservation observation)
         {
-            if (rapidSoundResponse) nextDecision = 0f; // Wake next Update, outside the sound dispatcher.
+            if (rapidSoundResponse)
+                nextDecision = HasPrototypeTempo ? Mathf.Min(nextDecision, Time.time + PrototypeDecisionOffset) : 0f;
         }
 
         // Health initialization is one-shot. Movement is bound separately in Start so profile
@@ -124,25 +180,37 @@ namespace ShiftFour
             }
             if (difficultyProfile == null) return false; // Custom/unconfigured brains retain legacy tuning.
             DifficultySettings = difficultyProfile.Settings;
+            MovementSettings = combatReadiness != null ? combatReadiness.Tuning.Apply(DifficultySettings) : DifficultySettings;
             if (health == null) health = GetComponent<Health>();
-            float maximum = DifficultySettings.maximumHealth;
+            float maximum = prototypeMaximumHealth > 0f ? prototypeMaximumHealth : DifficultySettings.maximumHealth;
             if (gameObject.scene.name == "MainLab") maximum *= GameSession.CombatDurationMultiplier;
             return health != null && health.TryInitializeMaximum(maximum);
         }
 
         private void Update()
         {
-            if (!Alive || player == null) return;
-            if (GameSession.Instance != null && !GameSession.Instance.CanPlay) return;
-            if (!player.GetComponent<Health>().IsAlive || (GameSession.Instance != null && GameSession.Instance.Ended))
+            if (!Alive || player == null || player.MenuBlocksInput) return;
+            // Decision and navigation state are initialized for the lifetime of a play session.
+            if (Awareness == null || motor == null)
+            {
+                WeaponAimPoint = null;
+                if (motor != null) motor.Stop();
+                return;
+            }
+            var session = outdoorPatrol == null ? GameSession.Instance : null;
+            if (session != null && !session.CanPlay) return;
+            if (playerHealth == null || !playerHealth.IsAlive || (session != null && session.Ended))
             {
                 WeaponAimPoint = null;
                 motor.Stop();
                 return;
             }
             if (Time.time < nextDecision) return;
-            nextDecision = Time.time + DecisionInterval;
             bool visible = CanSeePlayer();
+            if (visible) ConfirmPrototypeSight();
+            nextDecision = Time.time + (combatReadiness == null ? DecisionInterval :
+                (IsAggressive ? .07f : .13f) + PrototypeDecisionOffset * .11f);
+            if (HasPrototypeTempo) motor.AimAt(null);
             WeaponAimPoint = visible ? player.EyePosition : (Vector3?)null;
             weaponMount?.AimAt(WeaponAimPoint);
             Vector3 position = player.transform.position;
@@ -174,7 +242,7 @@ namespace ShiftFour
             // Navigation still respects closed gates, and every shot still needs clear cover checks.
             // Keep each archetype's close-range tactics; pursue instead of disengaging
             // when cover or distance would otherwise let the player end the encounter.
-            if (HasCommittedToAttack && (!visible || distance > attackRange))
+            if (outdoorPatrol == null && HasCommittedToAttack && (!visible || distance > attackRange))
             {
                 CurrentDecision = "Pursue engaged player";
                 motor.SetMovementMode(DroneMovementMode.Chase);
@@ -182,6 +250,15 @@ namespace ShiftFour
                 return;
             }
             motor.SetMovementMode(DroneMovementSpeeds.FromAwareness(Awareness.State));
+            if (outdoorPatrol != null && !visible && ShouldResumePatrol(position))
+            {
+                if (Vector3.Distance(transform.position, outdoorPatrol[outdoorPost]) <= outdoorArrivalDistance)
+                    outdoorPost = (outdoorPost + 1) % outdoorPatrol.Length;
+                CurrentDecision = GeneratedPatrolLabel + (outdoorPost + 1);
+                motor.SetMovementMode(DroneMovementMode.Patrol);
+                motor.GoTo(outdoorPatrol[outdoorPost]);
+                return;
+            }
             DecisionOption choice = Decide(visible, position, distance);
             if (UsesImmediateSoundInvestigation && !OwnsSoundInvestigation && !visible && hasSound &&
                 Awareness.State == DroneAwarenessState.Investigate && Reachable(sound.Position))
@@ -190,9 +267,19 @@ namespace ShiftFour
                 motor.SetMovementMode(DroneMovementMode.Investigate);
             }
             CurrentDecision = choice.Name;
-            MoveToDecision(choice, visible);
-            if (visible && distance <= attackRange) TryShoot();
+            if (HasPrototypeTempo && visible && (choice.Destination - transform.position).sqrMagnitude < .02f)
+            {
+                motor.HoldAtFiringPost();
+                motor.AimAt(player.EyePosition);
+            }
+            else MoveToDecision(choice, visible);
+            if (visible && distance <= AttackRange) TryShoot();
         }
+
+        protected virtual bool ShouldResumePatrol(Vector3 targetPosition) => Awareness.State == DroneAwarenessState.Patrol;
+        protected virtual bool InDetectionArc(Vector3 offset) => true;
+
+        protected void ResumePatrolAt(int post) => outdoorPost = post;
 
         protected abstract DecisionOption Decide(bool visible, Vector3 playerPosition, float distance);
 
@@ -213,44 +300,61 @@ namespace ShiftFour
 
         protected bool Reachable(Vector3 target)
         {
-            WaypointGraph graph = GameSession.Instance != null ? GameSession.Instance.Graph : null;
+            WaypointGraph graph = NavigationGraph;
             return graph != null && graph.FindRoute(transform.position, target).Count > 0;
         }
 
         private bool CanSeePlayer()
         {
+            if (HasPrototypeTempo && !player.isActiveAndEnabled) return false;
+            if (!CanTarget(player.transform.position)) return false;
             Vector3 origin = CombatOrigin;
             Vector3 vector = player.EyePosition - origin;
-            if (vector.magnitude > visionDistance) return false;
+            if (vector.sqrMagnitude > VisionDistance * VisionDistance || !InDetectionArc(vector)) return false;
             // Stationed drones watch their entire surroundings rather than waiting to face the player.
-            return ClearShot(origin, vector, visionDistance);
+            return ClearShot(origin, vector, VisionDistance);
         }
+
+        // The utility policy proposes fire only when the shared combat gates can admit it.
+        // TryShoot still checks the muzzle and pivot against the current collision scene.
+        protected bool ShotReady => Time.time >= nextShot && ReadyForPrototypeShot &&
+            (outdoorAttackBudget == null || outdoorAttackBudget.CanFire(health));
 
         private void TryShoot()
         {
             using var profileSample=FireProfile.Auto();
-            if (!Alive || player == null || !player.GetComponent<Health>().IsAlive ||
-                (GameSession.Instance != null && GameSession.Instance.Ended) || Time.time < nextShot) return;
-            if (Vector3.Distance(CombatOrigin, player.EyePosition) > attackRange || !CanSeePlayer()) return;
+            if (!Alive || playerHealth == null || !playerHealth.IsAlive ||
+                (outdoorPatrol == null && GameSession.Instance != null && GameSession.Instance.Ended) || !ShotReady) return;
+            float range = AttackRange;
+            if (Vector3.Distance(CombatOrigin, player.EyePosition) > range ||
+                (combatReadiness == null ? !CanSeePlayer() : !player.isActiveAndEnabled || !CanTarget(player.transform.position))) return;
             weaponMount?.AimAt(player.EyePosition);
             // A protruding barrel cannot bypass cover between its mounting point and tip.
             if (weaponMount != null && !ClearShotAtFire(weaponMount.PivotPosition,
-                player.EyePosition - weaponMount.PivotPosition, attackRange, out _)) return;
-            nextShot = Time.time + ShotInterval;
+                player.EyePosition - weaponMount.PivotPosition, range, out _)) return;
             Vector3 origin = CombatOrigin;
             Vector3 vector = player.EyePosition - origin;
             // A second raycast at fire time makes solid shelves and pillars real cover.
-            if (ClearShotAtFire(origin, vector, attackRange, out Vector3 hitPoint))
+            bool clear = ClearShotAtFire(origin, vector, range, out Vector3 hitPoint);
+            if (clear && !TryAuthorizeShot()) return;
+            nextShot = Time.time + ShotInterval;
+            if (clear)
             {
+                outdoorAttackBudget?.RecordFire(health);
                 HasCommittedToAttack = true;
-                Awareness?.CommitToCombat(Time.time);
-                LastShotOrigin = origin;
-                LastShotHit = hitPoint;
+                if (outdoorPatrol == null) Awareness?.CommitToCombat(Time.time);
                 WeaponAimPoint = player.EyePosition;
-                player.GetComponent<Health>().ApplyDamage(ShotDamage, this, "Drone shot: " + agentName);
-                ShotFired?.Invoke(this);
+                playerHealth.ApplyDamage(DamagePerShot, this, "Drone shot: " + agentName);
+                PublishAcceptedShot(origin, hitPoint);
                 SoundEvents.ReportNoise(origin, NoiseCategory.Gunshot, 1f, this);
             }
+        }
+
+        internal void PublishAcceptedShot(Vector3 origin, Vector3 hit)
+        {
+            LastShotOrigin = origin;
+            LastShotHit = hit;
+            ShotFired?.Invoke(this);
         }
 
         private bool ClearShot(Vector3 origin, Vector3 vector, float range)
@@ -283,8 +387,11 @@ namespace ShiftFour
             Awareness?.Disable();
             if (Hearing != null) Hearing.enabled = false;
             motor.Stop();
+            // Generated drones leave avoidance immediately. The separate wreck keeps its physics rig.
+            if (outdoorPatrol != null && TryGetComponent(out UnityEngine.AI.NavMeshAgent agent)) agent.enabled = false;
             foreach (Collider body in GetComponentsInChildren<Collider>()) body.enabled = false;
-            GameSession.Instance?.DroneDestroyed(this);
+            OnDefeated();
+            if (outdoorPatrol == null) GameSession.Instance?.DroneDestroyed(this);
         }
 
         private void OnDestroy()

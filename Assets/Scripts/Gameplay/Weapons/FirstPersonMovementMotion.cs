@@ -59,6 +59,19 @@ namespace ShiftFour
         private void OnEnable() { Initialize(); ResetMotion(); }
         private void OnDisable() => ResetMotion();
 
+        internal void ConfigureOutdoorHandling()
+        {
+            walkPositionAmplitude = new Vector3(.004f, .005f, .003f);
+            walkRotationAmplitude = new Vector3(.46f, .19f, .55f);
+            strafeLag = .006f;
+            strafeRoll = .7f;
+            forwardLean = .4f;
+            airbornePosition = new Vector3(.002f, -.009f, -.006f);
+            airborneRotation = new Vector3(1.1f, 0, -.45f);
+            landingDip = .012f;
+            landingPitch = 1.2f;
+        }
+
         public bool Initialize()
         {
             if (player != null && controller != null) return true;

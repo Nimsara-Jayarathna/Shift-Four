@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using Unity.Profiling;
 using UnityEngine.AI;
 
 namespace ShiftFour
@@ -266,6 +267,12 @@ namespace ShiftFour
         // on the next decision; callers outside that scope always get a fresh physical query.
         private readonly Dictionary<(Vector3 from, Vector3 to, bool clearance), Vector3[]> routes = new();
         private readonly Dictionary<Vector3, bool> occupancy = new();
+        private static readonly ProfilerMarker RouteValidation = new("ShiftFour.Interceptor.RouteValidation");
+        private readonly Collider[] overlaps = new Collider[32];
+        private readonly RaycastHit[] hits = new RaycastHit[32];
+        private readonly Vector3[] corners = new Vector3[32];
+        private readonly NavMeshPath segment = new();
+        private readonly List<Vector3> result = new(32);
         private bool evaluating;
         private int cachedVersion;
         public int RouteQueries { get; private set; }
@@ -317,19 +324,39 @@ namespace ShiftFour
         public bool CanOccupy(Vector3 point)
         {
             if(evaluating) { CheckVersion(); if(occupancy.TryGetValue(point,out bool cached))return cached; }
-            bool clear=true;
-            foreach (var c in Physics.OverlapBox(point+Center,Extents,Quaternion.identity,~0,QueryTriggerInteraction.Ignore))
-                if (External(c)) { clear=false; break; }
-            if(evaluating)occupancy[point]=clear;
+            int count = Physics.OverlapBoxNonAlloc(point + Center, Extents, overlaps, Quaternion.identity,
+                ~0, QueryTriggerInteraction.Ignore);
+            bool clear = OccupancyClear(point, count);
+            if (evaluating) occupancy[point] = clear;
             return clear;
         }
+        private bool OccupancyClear(Vector3 point, int count)
+        {
+            for (int i = 0; i < count; i++)
+                if (External(overlaps[i])) return false;
+            // A full buffer can hide another collider. Preserve the original result in dense geometry.
+            if (count == overlaps.Length)
+                foreach (var contact in Physics.OverlapBox(point + Center, Extents, Quaternion.identity,
+                    ~0, QueryTriggerInteraction.Ignore))
+                    if (External(contact)) return false;
+            return true;
+        }
+
         private bool Clear(Vector3 a, Vector3 b)
         {
             if (!CanOccupy(a) || !CanOccupy(b)) return false;
-            Vector3 delta=b-a;
-            if (delta.sqrMagnitude<.000001f) return true;
-            foreach (var hit in Physics.BoxCastAll(a+Center,Extents,delta.normalized,Quaternion.identity,delta.magnitude,~0,QueryTriggerInteraction.Ignore))
-                if (External(hit.collider)) return false;
+            Vector3 delta = b - a;
+            if (delta.sqrMagnitude < .000001f) return true;
+            Vector3 direction = delta.normalized;
+            float distance = delta.magnitude;
+            int count = Physics.BoxCastNonAlloc(a + Center, Extents, direction, hits, Quaternion.identity,
+                distance, ~0, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < count; i++)
+                if (External(hits[i].collider)) return false;
+            if (count == hits.Length)
+                foreach (var hit in Physics.BoxCastAll(a + Center, Extents, direction, Quaternion.identity,
+                    distance, ~0, QueryTriggerInteraction.Ignore))
+                    if (External(hit.collider)) return false;
             return true;
         }
         public Vector3[] Route(Vector3 from, Vector3 to) => CheckedRoute(from,to,true);
@@ -341,10 +368,11 @@ namespace ShiftFour
                 CheckVersion();
                 if(routes.TryGetValue((from,to,clearance),out var cached)) { CacheHits++; return cached; }
             }
+            using var sample = RouteValidation.Auto();
             RouteQueries++;
-            var result=RouteCore(from,to,clearance);
-            if(evaluating)routes[(from,to,clearance)]=result;
-            return result;
+            var route = RouteCore(from, to, clearance);
+            if (evaluating) routes[(from, to, clearance)] = route;
+            return route;
         }
         private Vector3[] RouteCore(Vector3 from, Vector3 to, bool clearance)
         {
@@ -352,18 +380,29 @@ namespace ShiftFour
             var nodes=graph.FindRoute(from,to); if (nodes.Count==0) return null;
             if (!NavMesh.SamplePosition(from,out var start,.25f,agent.areaMask)) return null;
             if (clearance && !CanOccupy(start.position)) return null;
-            var result=new List<Vector3> { start.position }; Vector3 previous=start.position;
+            result.Clear();
+            result.Add(start.position);
+            Vector3 previous = start.position;
             foreach (var node in nodes)
             {
                 if (!NavMesh.SamplePosition(node,out var end,.25f,agent.areaMask)) return null;
-                var path=new NavMeshPath();
-                if (!NavMesh.CalculatePath(previous,end.position,agent.areaMask,path) || path.status!=NavMeshPathStatus.PathComplete) return null;
-                foreach (var p in path.corners)
+                if (!NavMesh.CalculatePath(previous, end.position, agent.areaMask, segment) ||
+                    segment.status != NavMeshPathStatus.PathComplete) return null;
+                int count = segment.GetCornersNonAlloc(corners);
+                Vector3[] points = corners;
+                if (count == corners.Length)
                 {
-                    if (clearance && !Clear(result[result.Count-1],p)) return null;
-                    if (Vector3.Distance(result[result.Count-1],p)>.001f) result.Add(p);
+                    points = segment.corners;
+                    count = points.Length;
                 }
-                previous=end.position;
+                for (int i = 0; i < count; i++)
+                {
+                    Vector3 point = points[i];
+                    Vector3 tail = result[result.Count - 1];
+                    if (clearance && !Clear(tail, point)) return null;
+                    if (Vector3.Distance(tail, point) > .001f) result.Add(point);
+                }
+                previous = end.position;
             }
             return result.ToArray();
         }

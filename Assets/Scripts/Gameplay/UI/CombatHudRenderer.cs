@@ -250,14 +250,70 @@ namespace ShiftFour
             if (recovering)
                 Fill(new Rect(49, h - 57, 248 * Mathf.Clamp01(fraction), 2), new Color(.68f, 1, .87f, .4f + .2f * Mathf.Sin(Time.unscaledTime * 5)));
         }
-        private void DrawDroneBar(CombatHud.DroneBar bar, float scale, float w, float h)
+        internal void DrawPrototype(List<CombatHud.DroneBar> drones, Health health, float fraction, float trail, bool recovering, WeaponRuntimeState weapon, bool identify)
+        {
+            Matrix4x4 previous = GUI.matrix;
+            Color previousColor = GUI.color;
+            float scale = Mathf.Max(.1f, Mathf.Min(Screen.width / 1280f, Screen.height / 720f));
+            GUI.matrix = Matrix4x4.Scale(Vector3.one * scale);
+            try
+            {
+                float w = Screen.width / scale, h = Screen.height / scale;
+                float y = h - 88f;
+                Color condition = fraction <= .3f ? Red : fraction <= .6f ? new Color(1f, .72f, .28f) : new Color(.42f, .87f, .62f);
+                Panel(new Rect(24, y, 258, 64));
+                Fill(new Rect(38, y + 18, 13, 4), condition);
+                Fill(new Rect(42.5f, y + 13.5f, 4, 13), condition);
+                Label(new Rect(59, y + 6, 136, 26), "PLAYER HEALTH", 13, recovering ? Cyan : White, TextAnchor.MiddleLeft);
+                Label(new Rect(173, y + 5, 94, 28), $"{Mathf.CeilToInt(health.Current)} / {Mathf.CeilToInt(health.Maximum)}", 17, White, TextAnchor.MiddleRight);
+                Fill(new Rect(38, y + 40, 229, 9), Muted * .4f);
+                Fill(new Rect(38, y + 40, 229 * trail, 9), new Color(.96f, .66f, .44f));
+                Fill(new Rect(38, y + 40, 229 * fraction, 9), condition);
+                if (recovering)
+                    Fill(new Rect(38, y + 37, 229 * fraction, 2), Color.Lerp(condition, White, .5f + .3f * Mathf.Sin(Time.unscaledTime * 7f)));
+                Panel(new Rect(w - 186, y, 162, 64));
+                bool reloading = weapon?.ReloadState == WeaponReloadState.Reloading;
+                Label(new Rect(w - 172, y + 6, 134, 21), weapon == null ? "MELEE" : reloading ? "PISTOL    RELOADING" : "PISTOL",
+                    13, reloading ? Cyan : Muted, TextAnchor.MiddleRight);
+                Label(new Rect(w - 172, y + 24, 134, 34), weapon == null ? "KNIFE" : $"{weapon.RoundsInMagazine} / {weapon.ReserveRounds}",
+                    22, weapon?.RoundsInMagazine == 0 ? Red : White, TextAnchor.MiddleRight);
+                foreach (CombatHud.DroneBar bar in drones)
+                    if (bar.Visible && bar.Health != null && bar.Health.IsAlive)
+                        DrawDroneBar(bar, scale, Screen.width / scale, Screen.height / scale, showName: identify);
+            }
+            finally
+            {
+                GUI.matrix = previous;
+                GUI.color = previousColor;
+            }
+        }
+
+        private void DrawDroneBar(CombatHud.DroneBar bar, float scale, float w, float h, bool showName = true)
         {
             Vector2 p = bar.ScreenPoint / scale;
             float x = Mathf.Clamp(p.x - 70, 20, w - 160), y = Mathf.Clamp(p.y - 20, 4, h - 34);
             Color background = Ink; background.a *= bar.Alpha;
             Fill(new Rect(x - 7, y - 3, 154, 30), background);
-            Label(new Rect(x, y, 140, 16), bar.Label + "   " + Mathf.CeilToInt(bar.Health.Current) + " / " + Mathf.CeilToInt(bar.Health.Maximum), 10,
-                new Color(White.r, White.g, White.b, bar.Alpha));
+            string hp = Mathf.CeilToInt(bar.Health.Current) + " / " + Mathf.CeilToInt(bar.Health.Maximum);
+            var text = new Color(White.r, White.g, White.b, bar.Alpha);
+            if (bar.Role == DroneFlightRole.Default)
+                Label(new Rect(x, y, 140, 16), showName ? bar.Label + "   " + hp : hp, 10, text);
+            else
+            {
+                if (showName)
+                {
+                    Color ink = bar.Role switch
+                    {
+                        DroneFlightRole.Scout => Cyan,
+                        DroneFlightRole.Flanker => new Color(1f, .72f, .36f),
+                        DroneFlightRole.Guard => new Color(.59f, .89f, .65f),
+                        _ => new Color(1f, .58f, .54f)
+                    };
+                    ink.a = bar.Alpha;
+                    Label(new Rect(x, y, 84, 16), bar.Label, 11, ink);
+                }
+                Label(new Rect(x + 84, y, 56, 16), hp, 10, text, TextAnchor.UpperRight);
+            }
             Fill(new Rect(x, y + 19, 140, 4), new Color(.22f, .12f, .14f, bar.Alpha));
             Fill(new Rect(x, y + 19, 140 * Mathf.Clamp01(bar.Trail), 4), new Color(.9f, .56f, .41f, bar.Alpha));
             Fill(new Rect(x, y + 19, 140 * Mathf.Clamp01(bar.Fraction), 4), new Color(Red.r, Red.g, Red.b, bar.Alpha));

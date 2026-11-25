@@ -11,13 +11,27 @@ namespace ShiftFour
     public sealed class InterceptorBrain : DroneBrain
     {
         protected override bool OwnsSoundInvestigation => true;
+        protected override float VisionDistance => response?.VisionDistance ?? base.VisionDistance;
+        protected override float AttackRange => response == null ? base.AttackRange : OutdoorInterceptorResponse.AttackDistance;
+        protected override float ShotInterval => response == null ? base.ShotInterval : .48f;
+        protected override bool ShouldResumePatrol(Vector3 targetPosition)
+            => response == null && base.ShouldResumePatrol(targetPosition);
+        protected override bool CanTarget(Vector3 position)
+            => response == null || (Player != null && Player.isActiveAndEnabled && response.CanSee(position));
+        protected override bool TryAuthorizeShot()
+            => response == null || response.AuthorizeShot(transform.position, transform.forward, Player.transform.position);
         [SerializeField] private InterceptorSettings prediction = new InterceptorSettings();
+        [SerializeField] private InterceptorDecisionSettings outdoorDecisions = new();
+        [SerializeField] private InterceptorLearningSettings outdoorLearning = new();
         [SerializeField] private ControlTacticalSettings controlTactics = new ControlTacticalSettings();
         [SerializeField, FormerlySerializedAs("developerDiagnostics")] private bool showControlTactics;
         private InterceptorPolicy policy;
         private ControlTacticalNavigation tactical;
         private ControlTacticalRouteValidator validator;
         private WaypointGraph tacticalGraph;
+        private OutdoorInterceptorResponse response;
+        private ControlTacticalRouteValidator responseRoutes;
+        private NavMeshAgent responseAgent;
         private readonly List<Vector3> junctions = new List<Vector3>();
         private readonly Dictionary<int, ControlTacticalPlan> localPlans = new Dictionary<int, ControlTacticalPlan>();
         public InterceptorPolicy Policy => policy;
@@ -40,14 +54,80 @@ namespace ShiftFour
             new Vector3(1,0,-1).normalized, new Vector3(-1,0,-1).normalized };
 
         private static readonly ProfilerMarker DecisionProfile=new ProfilerMarker("ShiftFour.Decision");
+
+        internal bool IsResponding => Alive && response != null && response.IsResponding;
+
+        internal void ConfigureResponse(OutdoorInterceptorResponse outdoorResponse)
+        {
+            response = outdoorResponse;
+            response.Configure(outdoorDecisions ?? new InterceptorDecisionSettings());
+            response.ConfigureLearning(outdoorLearning ?? new InterceptorLearningSettings());
+            responseAgent = GetComponent<NavMeshAgent>();
+        }
+
+        internal bool TryPlanResponse(Vector3 report, out Vector3 destination, out float distance)
+        {
+            destination = default;
+            distance = float.PositiveInfinity;
+            if (!isActiveAndEnabled || !Alive || responseAgent == null || !responseAgent.isOnNavMesh) return false;
+            responseRoutes ??= new ControlTacticalRouteValidator(this, NavigationGraph, .04f);
+            return response.TryPlanDispatch(transform.position, report, responseRoutes, MovementSettings.chaseSpeed,
+                out destination, out distance);
+        }
+
+        internal bool CoordinationAvailable => isActiveAndEnabled && Alive && responseAgent != null &&
+            responseAgent.isActiveAndEnabled && responseAgent.isOnNavMesh;
+        internal float ResponseTravelSpeed => Mathf.Max(1f, MovementSettings.chaseSpeed);
+
+        internal bool TryPlanSquadResponse(Vector3 report, out Vector3 destination, out float length)
+        {
+            destination = default;
+            length = float.PositiveInfinity;
+            if (!CoordinationAvailable) return false;
+            responseRoutes ??= new ControlTacticalRouteValidator(this, NavigationGraph, .04f);
+            return response.TryPlanDispatch(transform.position, report, responseRoutes, ResponseTravelSpeed,
+                out destination, out length, avoidReservations: true);
+        }
+
+        internal void DispatchResponse(Vector3 report, Vector3 destination, float distance, InterceptorEvidence? evidence = null)
+        {
+            responseRoutes ??= new ControlTacticalRouteValidator(this, NavigationGraph, .04f);
+            prediction.predictionHorizon = response.LeadHorizon;
+            policy = new InterceptorPolicy(prediction, adaptivePrediction: true) { Learning = response.Learning };
+            ReactToThreat();
+            response.Dispatch(report, destination, distance, MovementSettings.chaseSpeed, ReactionSeconds(.8f), evidence);
+        }
+
         protected override DecisionOption Decide(bool visible, Vector3 playerPosition, float distance)
         {
             using var profileSample=DecisionProfile.Auto();
+            if (response != null)
+            {
+                responseRoutes ??= new ControlTacticalRouteValidator(this, NavigationGraph, .04f);
+                if (visible) response.ShareSight(playerPosition);
+                if (visible && response.TryRespondToSight(this))
+                    DispatchResponse(playerPosition, transform.position, distance);
+                else if (!visible && response.TryRespondToSound(this, Hearing, responseRoutes, MovementSettings.investigationSpeed))
+                {
+                    prediction.predictionHorizon = response.LeadHorizon;
+                    policy = new InterceptorPolicy(prediction, adaptivePrediction: true) { Learning = response.Learning };
+                }
+
+                var order = response.Decide(this, policy, responseRoutes, visible, visible ? playerPosition : default,
+                    MovementSettings.chaseSpeed, Motor.ActualVelocity, responseAgent.acceleration, visible && distance <= AttackRange && ShotReady);
+                Motor.SetMovementMode(response.Action is InterceptorAction.InvestigateSound or InterceptorAction.SearchBeliefRegion
+                    ? DroneMovementMode.Investigate
+                    : response.State is OutdoorInterceptorResponse.Phase.Alerted or OutdoorInterceptorResponse.Phase.Intercept or
+                        OutdoorInterceptorResponse.Phase.Attack or OutdoorInterceptorResponse.Phase.Reposition
+                        ? DroneMovementMode.Chase : DroneMovementMode.Patrol);
+                SensorDecision = order.Name;
+                return order;
+            }
             IsInvestigatingSound = false;
             SensorDecision = "Visual prediction and its bounded fallbacks";
             if (policy == null) policy = new InterceptorPolicy(prediction);
             if (tactical == null) tactical = new ControlTacticalNavigation(controlTactics);
-            var graph = GameSession.Instance != null ? GameSession.Instance.Graph : null;
+            var graph = NavigationGraph;
             if (graph != null && (validator == null || tacticalGraph != graph))
             {
                 tacticalGraph = graph;
@@ -101,6 +181,23 @@ namespace ShiftFour
             }
             finally { validator?.EndDecision(); }
         }
+
+        protected override void MoveToDecision(DecisionOption choice, bool visible)
+        {
+            if (response == null) base.MoveToDecision(choice, visible);
+            else Motor.GoTo(choice.Destination);
+        }
+
+        private void LateUpdate()
+        {
+            if (HasPrototypeTempo || !Alive || WeaponAimPoint is not Vector3 aim || response?.State != OutdoorInterceptorResponse.Phase.Attack) return;
+            Vector3 heading = Vector3.ProjectOnPlane(aim - transform.position, Vector3.up);
+            if (heading.sqrMagnitude > .01f)
+                transform.rotation = Quaternion.RotateTowards(transform.rotation, Quaternion.LookRotation(heading),
+                    responseAgent.angularSpeed * Time.deltaTime);
+        }
+
+        protected override void OnDefeated() => response?.Defeat();
 
         private bool TrySoundInvestigation(out DecisionOption decision)
         {
@@ -201,6 +298,20 @@ namespace ShiftFour
                 return ControlRoute(to);
             return validator.Route(from, to);
         }
+
+        internal bool DiagnosticAlive => Alive;
+        internal OutdoorInterceptorResponse.Phase? OutdoorPhase => response?.State;
+        internal Vector3? ReportedPosition => response != null ? response.LastReport :
+            policy != null && float.IsFinite(policy.LastObservedAt) ? policy.LastObserved : null;
+        internal string ResponsePhase => response?.State.ToString();
+        internal OutdoorInterceptorResponse DiagnosticResponse => response;
+        internal Vector3 InspectionOrigin => CombatOrigin;
+        internal bool InspectionArc(Vector3 offset) => InDetectionArc(offset);
+        internal IReadOnlyList<Vector3> ResponseJunctions => response?.RoadJunctions;
+        internal IReadOnlyList<Vector3> ActiveAStarRoute => Motor != null && Motor.HasRoute ? Motor.RouteForDiagnostics : null;
+        internal int ActiveRouteStep => Motor != null ? Motor.RouteStepForDiagnostics : 0;
+        internal WaypointGraph DiagnosticGraph => NavigationGraph;
+        internal DroneMotor DiagnosticMotor => Motor;
 
         private void OnDrawGizmosSelected()
         {

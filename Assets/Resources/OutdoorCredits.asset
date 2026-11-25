@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: aa391800ae3144e7a146ee8bf02fc34d, type: 3}
+  m_Name: OutdoorCredits
+  m_EditorClassIdentifier: Assembly-CSharp::ShiftFour.OutdoorCreditsConfig
+  groupNumber: 26
+  team:
+  - name: PAMUDI
+    role: World Builder
+    assignment: Scout AI | Checkpoint
+  - name: NIMSARA
+    role: Systems Engineer
+    assignment: Flanker AI | Storage
+  - name: NIMTHARA
+    role: Core Developer
+    assignment: Guard AI | Server
+  - name: ASMADALA
+    role: Agent Controller
+    assignment: Interceptor AI | Control
+  music: {fileID: 8300000, guid: eb2e45a45deb440b83fe36f98e4c6939, type: 3}

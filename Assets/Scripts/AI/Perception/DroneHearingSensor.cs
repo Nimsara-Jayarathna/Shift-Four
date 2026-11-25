@@ -12,6 +12,7 @@ namespace ShiftFour
         private readonly RaycastHit[] hits = new RaycastHit[32];
         private readonly Collider[] overlaps = new Collider[8];
         private readonly SoundObservation[] memory = new SoundObservation[4];
+        private readonly bool[] playerEvidence = new bool[4];
         private readonly int[] memoryVersions = new int[4];
         // Value keys only, bounded independently of actors. Never retain NoiseEvent.Source.
         private readonly NoiseKey[] recent = new NoiseKey[32];
@@ -71,7 +72,13 @@ namespace ShiftFour
         public bool TryGetLatest(out SoundObservation observation) => TryGetLatestAt(Time.time, out observation);
 
         // Explicit clock is for deterministic simulation; reads never refresh an observation's deadline.
+        internal bool TryGetLatestPlayerSound(out SoundObservation observation)
+            => TryGetLatestAt(Time.time, out observation, playerOnly: true);
+
         public bool TryGetLatestAt(float now, out SoundObservation observation)
+            => TryGetLatestAt(now, out observation, playerOnly: false);
+
+        private bool TryGetLatestAt(float now, out SoundObservation observation, bool playerOnly)
         {
             observation = default;
             if (!isActiveAndEnabled || !configured || (health != null && !health.IsAlive) ||
@@ -80,6 +87,7 @@ namespace ShiftFour
             for (int i = 0; i < memoryCount; i++)
             {
                 int index = (memoryNext - 1 - i + memory.Length) % memory.Length;
+                if (playerOnly && !playerEvidence[index]) continue;
                 SoundObservation candidate = memory[index];
                 if (memoryVersions[index] != graph.Version || !candidate.IsFresh(now)) continue;
                 if (!found || candidate.EmittedAt > observation.EmittedAt) { observation = candidate; found = true; }
@@ -127,6 +135,8 @@ namespace ShiftFour
                 memory[memoryNext] = new SoundObservation(goal, noise.Category, strength, uncertainty,
                     noise.Timestamp, noise.Timestamp + settings.memorySeconds);
                 memoryVersions[memoryNext] = graph.Version;
+                playerEvidence[memoryNext] = noise.Source is PlayerController ||
+                    ReferenceEquals(noise.Source, null) && noise.Category == NoiseCategory.Gunshot;
                 SoundObservation accepted = memory[memoryNext];
                 memoryNext = (memoryNext + 1) % memory.Length; memoryCount = Mathf.Min(memory.Length, memoryCount + 1);
                 ObservationAccepted?.Invoke(accepted);

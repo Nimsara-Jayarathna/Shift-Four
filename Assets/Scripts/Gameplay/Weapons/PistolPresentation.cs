@@ -22,6 +22,9 @@ namespace ShiftFour
         private Quaternion restRotation;
         private readonly FirstPersonRecoilMotion recoil = new FirstPersonRecoilMotion();
         private float flashUntil;
+        private float lastReloadPose, releaseStarted = float.NegativeInfinity;
+        private Vector3 flashRestScale;
+        private bool outdoorHandling;
         private Vector3 magazineRestPosition;
         private Quaternion magazineRestRotation;
         private FirstPersonArms arms;
@@ -61,6 +64,20 @@ namespace ShiftFour
             arms = GetComponent<FirstPersonArms>();
             if (arms == null) arms = gameObject.AddComponent<FirstPersonArms>();
             arms.Initialize(recoilPivot);
+            outdoorHandling = GetComponentInParent<OutdoorPlayerEquipment>() != null;
+            if (outdoorHandling)
+            {
+                arms.GetComponentInChildren<FirstPersonPistolGrip>()?.SetOutdoorPistolGrip();
+                idle.ConfigureOutdoorHandling();
+                movement.ConfigureOutdoorHandling();
+                reload?.ConfigureOutdoorHandling(recoilPivot);
+                recoilDistance = .025f;
+                recoilDegrees = 3.4f;
+                recoilLift = .002f;
+                recoilRoll = .18f;
+                recovery = 27f;
+                if (muzzleFlash != null) flashRestScale = muzzleFlash.transform.localScale;
+            }
         }
 
         private void OnEnable()
@@ -71,6 +88,8 @@ namespace ShiftFour
         private void OnDisable()
         {
             if (model != null) { model.ShotReceived -= OnShot; model.ReloadChanged -= OnReload; }
+            releaseStarted = float.NegativeInfinity;
+            lastReloadPose = flashUntil = 0f;
             recoil.Reset();
             if (idle != null) idle.ResetMotion();
             if (movement != null) movement.ResetMotion();
@@ -80,9 +99,13 @@ namespace ShiftFour
 
         private void OnReload(WeaponReloadState state)
         {
+            // The last accepted shot can start automatic reload at the very same timestamp.
+            if (outdoorHandling && state == WeaponReloadState.Reloading && Time.time < flashUntil) return;
             recoil.Reset();
             if (muzzleFlash != null) muzzleFlash.enabled = false;
-            if (state == WeaponReloadState.Idle) ApplyPose(true);
+            if (outdoorHandling && state == WeaponReloadState.Idle && lastReloadPose > 0f)
+                releaseStarted = Time.time;
+            else if (state == WeaponReloadState.Idle) ApplyPose(true);
         }
 
         private void OnShot(WeaponShot _)
@@ -90,7 +113,11 @@ namespace ShiftFour
             recoil.AcceptShot(Time.timeAsDouble, recovery);
             ApplyPose();
             flashUntil = Time.time + flashDuration;
-            if (muzzleFlash != null) muzzleFlash.enabled = true;
+            if (muzzleFlash != null)
+            {
+                if (outdoorHandling) muzzleFlash.transform.localScale = flashRestScale;
+                muzzleFlash.enabled = true;
+            }
         }
 
         private void LateUpdate()
@@ -98,11 +125,18 @@ namespace ShiftFour
             // The accepted-shot callback and LateUpdate share one scaled timestamp. Never age a new
             // impulse by the whole preceding frame, which would shorten recoil at lower frame rates.
             recoil.Sample(Time.timeAsDouble, recovery);
-            bool suppressed = recoil.Strength > .02f || model.ReloadState == WeaponReloadState.Reloading;
+            bool switching = outdoorHandling && mount != null && mount.TransitionState != WeaponPresentationState.Ready;
+            bool suppressed = switching || recoil.Strength > .02f || model.ReloadState == WeaponReloadState.Reloading;
             if (movement != null && movement.isActiveAndEnabled) movement.SamplePlayer(Time.deltaTime, suppressed);
             if (idle != null && idle.isActiveAndEnabled) idle.Advance(Time.deltaTime, suppressed);
             ApplyPose();
-            if (muzzleFlash != null && Time.time >= flashUntil) muzzleFlash.enabled = false;
+            if (muzzleFlash != null && muzzleFlash.enabled)
+            {
+                float remaining = flashUntil - Time.time;
+                if (remaining <= 0f) muzzleFlash.enabled = false;
+                else if (outdoorHandling) muzzleFlash.transform.localScale = flashRestScale *
+                    Mathf.Lerp(.40f, 1f, Mathf.Clamp01(remaining / flashDuration));
+            }
         }
 
         private void ApplyPose(bool reset = false)
@@ -110,7 +144,21 @@ namespace ShiftFour
             if (recoilPivot == null) return;
             float progress = !reset && model.ReloadState == WeaponReloadState.Reloading ? model.ReloadProgress : 0;
             bool detailed = reload != null && reload.isActiveAndEnabled && reload.MagazineGripTarget != null;
-            if (detailed) reload.Evaluate(progress);
+            if (detailed)
+            {
+                if (model.ReloadState == WeaponReloadState.Reloading)
+                {
+                    lastReloadPose = progress;
+                    releaseStarted = float.NegativeInfinity;
+                }
+                float releaseAge = Time.time - releaseStarted;
+                if (!reset && releaseAge < .12f)
+                {
+                    reload.Evaluate(lastReloadPose);
+                    reload.BlendToGrip(Mathf.SmoothStep(0f, 1f, releaseAge / .12f));
+                }
+                else reload.Evaluate(progress);
+            }
             float tilt = Mathf.SmoothStep(0, 1, Mathf.InverseLerp(0, .2f, progress)) *
                 (1 - Mathf.SmoothStep(0, 1, Mathf.InverseLerp(.8f, 1, progress)));
             recoilPivot.localPosition = restPosition + (framing != null ? framing.PositionOffset + framing.CoverPositionOffset(mount != null ? mount.PresentationRetreat : 0) : Vector3.zero) + RecoilPositionOffset + (detailed ? reload.PositionOffset : new Vector3(-.025f, .075f, .015f) * tilt);
